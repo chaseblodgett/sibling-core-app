@@ -4,22 +4,22 @@ import "time"
 
 // Family represents a household/family group that members belong to.
 type Family struct {
-	ID        string    `json:"id" db:"id"`
-	Name      string    `json:"name" db:"name"`
-	InviteCode string   `json:"invite_code" db:"invite_code"`
-	CreatedBy string    `json:"created_by" db:"created_by"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID         string    `json:"id" db:"id"`
+	Name       string    `json:"name" db:"name"`
+	InviteCode string    `json:"invite_code" db:"invite_code"`
+	CreatedBy  string    `json:"created_by" db:"created_by"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // FamilyInvite represents a pending invitation for a user to join a family by email.
 type FamilyInvite struct {
-	ID        string     `json:"id" db:"id"`
-	FamilyID  string     `json:"family_id" db:"family_id"`
-	Email     string     `json:"email" db:"email"`
-	InvitedBy string     `json:"invited_by" db:"invited_by"`
-	Status    string     `json:"status" db:"status"` // pending, accepted, revoked
-	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	ID         string     `json:"id" db:"id"`
+	FamilyID   string     `json:"family_id" db:"family_id"`
+	Email      string     `json:"email" db:"email"`
+	InvitedBy  string     `json:"invited_by" db:"invited_by"`
+	Status     string     `json:"status" db:"status"` // pending, accepted, revoked
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 	AcceptedAt *time.Time `json:"accepted_at,omitempty" db:"accepted_at"`
 }
 

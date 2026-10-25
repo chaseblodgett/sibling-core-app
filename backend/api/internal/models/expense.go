@@ -20,8 +20,8 @@ type Expense struct {
 // Balance is a computed (not persisted) summary of what one member owes or
 // is owed within a family, derived from expenses and their splits.
 type Balance struct {
-	MemberID    string `json:"member_id"`
-	NetCents    int64  `json:"net_cents"` // positive = owed to them, negative = they owe
+	MemberID string `json:"member_id"`
+	NetCents int64  `json:"net_cents"` // positive = owed to them, negative = they owe
 }
 
 // SplitRequest carries one member's share in a create-expense request.

@@ -1,0 +1,2 @@
+-- Seed data for local development, loaded by `supabase db reset`.
+-- Empty for now — add sample families/tasks/expenses here as features land.

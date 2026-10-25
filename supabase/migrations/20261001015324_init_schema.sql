@@ -1,6 +1,6 @@
 -- Initial schema for families, membership, tasks, expenses, and documents.
--- Written for Supabase Postgres: members.user_id references the built-in
--- auth.users table managed by Supabase Auth.
+-- members.user_id references the built-in auth.users table managed by
+-- Supabase Auth (present in both the local Docker stack and hosted projects).
 
 create extension if not exists pgcrypto;
 

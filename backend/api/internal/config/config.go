@@ -8,13 +8,13 @@ import (
 
 // Config holds all runtime configuration for the API server.
 type Config struct {
-	Port         string
-	Env          string
-	DatabaseURL  string // Postgres connection string (Supabase)
-	SupabaseURL  string
+	Port               string
+	Env                string
+	DatabaseURL        string // Postgres connection string (Supabase)
+	SupabaseURL        string
 	SupabaseAnonKey    string
 	SupabaseServiceKey string
-	JWTSecret    string
+	JWTSecret          string
 }
 
 // Load reads configuration from environment variables, applying sane

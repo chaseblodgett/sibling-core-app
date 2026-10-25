@@ -37,15 +37,14 @@ func Build(ctx context.Context) (*Container, error) {
 		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
-	// Repositories
+	userRepo := repository.NewUserRepository(db)
 	familyRepo := repository.NewFamilyRepository(db)
 	memberRepo := repository.NewMemberRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
 	expenseRepo := repository.NewExpenseRepository(db)
 	documentRepo := repository.NewDocumentRepository(db)
 
-	// Services
-	authService := service.NewAuthService(memberRepo)
+	authService := service.NewAuthService(userRepo, cfg.JWTSecret)
 	familyService := service.NewFamilyService(familyRepo, memberRepo)
 	taskService := service.NewTaskService(taskRepo)
 	expenseService := service.NewExpenseService(expenseRepo)

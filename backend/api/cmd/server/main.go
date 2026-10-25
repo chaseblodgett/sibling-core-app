@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 
@@ -12,6 +13,12 @@ import (
 )
 
 func main() {
+	// Loads backend/api/.env when present; in production, real env vars are
+	// already set and no .env file exists, so a missing file is not an error.
+	if err := godotenv.Load(); err != nil {
+		log.Printf("no .env file found, using existing environment variables")
+	}
+
 	ctx := context.Background()
 
 	container, err := di.Build(ctx)

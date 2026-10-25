@@ -4,7 +4,7 @@ package models
 type SignUpRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	FullName string `json:"full_name"`
+	Name     string `json:"name"`
 }
 
 // LoginRequest is the JSON body for POST /auth/login.
@@ -17,7 +17,7 @@ type LoginRequest struct {
 type SignUpInput struct {
 	Email    string
 	Password string
-	FullName string
+	Name     string
 }
 
 // LoginInput carries credentials for authenticating an existing user.
@@ -26,9 +26,8 @@ type LoginInput struct {
 	Password string
 }
 
-// AuthResult is returned after a successful sign up or login.
-type AuthResult struct {
-	UserID       string
-	AccessToken  string
-	RefreshToken string
+// AuthResponse is returned after a successful sign up or login.
+type AuthResponse struct {
+	Token string `json:"token"`
+	User  *User  `json:"user"`
 }
