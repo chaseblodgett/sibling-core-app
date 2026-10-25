@@ -3,7 +3,7 @@ import { type FormEvent, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { singleShadowTier } from "../theme/theme";
+import { cardRadius, singleShadowTier } from "../theme/theme";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -61,7 +61,7 @@ export function SignupPage() {
   return (
     <Box sx={{ display: "flex", justifyContent: "center", mt: { xs: 4, sm: 8 }, px: 2 }}>
       <Paper
-        sx={{ p: 4, width: "100%", maxWidth: 400, borderRadius: "14px", boxShadow: singleShadowTier }}
+        sx={{ p: 4, width: "100%", maxWidth: 400, borderRadius: `${cardRadius}px`, boxShadow: singleShadowTier }}
       >
         <Stack spacing={3} component="form" onSubmit={handleSubmit} noValidate>
           <Box>

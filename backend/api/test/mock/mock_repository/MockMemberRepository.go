@@ -13,6 +13,7 @@ type MockMemberRepository struct {
 	GetByIDFunc            func(ctx context.Context, id string) (*models.Member, error)
 	GetByUserAndFamilyFunc func(ctx context.Context, userID, familyID string) (*models.Member, error)
 	ListByFamilyFunc       func(ctx context.Context, familyID string) ([]*models.Member, error)
+	ListByUserFunc         func(ctx context.Context, userID string) ([]*models.Member, error)
 	DeleteFunc             func(ctx context.Context, id string) error
 }
 
@@ -42,6 +43,13 @@ func (m *MockMemberRepository) ListByFamily(ctx context.Context, familyID string
 		return nil, nil
 	}
 	return m.ListByFamilyFunc(ctx, familyID)
+}
+
+func (m *MockMemberRepository) ListByUser(ctx context.Context, userID string) ([]*models.Member, error) {
+	if m.ListByUserFunc == nil {
+		return nil, nil
+	}
+	return m.ListByUserFunc(ctx, userID)
 }
 
 func (m *MockMemberRepository) Delete(ctx context.Context, id string) error {

@@ -45,7 +45,7 @@ func Build(ctx context.Context) (*Container, error) {
 	documentRepo := repository.NewDocumentRepository(db)
 
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret)
-	familyService := service.NewFamilyService(familyRepo, memberRepo)
+	familyService := service.NewFamilyService(familyRepo, memberRepo, userRepo)
 	taskService := service.NewTaskService(taskRepo)
 	expenseService := service.NewExpenseService(expenseRepo)
 	documentService := service.NewDocumentService(documentRepo)
@@ -53,7 +53,7 @@ func Build(ctx context.Context) (*Container, error) {
 	// Handlers
 	handlers := &handler.Handlers{
 		Auth:     handler.NewAuthHandler(authService),
-		Family:   handler.NewFamilyHandler(familyService),
+		Family:   handler.NewFamilyHandler(familyService, authService),
 		Task:     handler.NewTaskHandler(taskService),
 		Expense:  handler.NewExpenseHandler(expenseService),
 		Document: handler.NewDocumentHandler(documentService),
