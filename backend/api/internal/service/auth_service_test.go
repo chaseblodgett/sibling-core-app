@@ -9,9 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
+	"sibling-core/api/internal/googleauth"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 	"sibling-core/api/internal/service"
+	mockgoogleauth "sibling-core/api/test/mock/mock_googleauth"
 	mockrepository "sibling-core/api/test/mock/mock_repository"
 )
 
@@ -19,15 +21,23 @@ const testSecret = "test-secret-at-least-32-characters-long"
 
 func newTestAuthService(t *testing.T) (service.AuthService, *mockrepository.MockUserRepository) {
 	t.Helper()
-	repo := &mockrepository.MockUserRepository{}
-	return service.NewAuthService(repo, testSecret), repo
+	svc, repo, _ := newTestAuthServiceWithVerifier(t)
+	return svc, repo
 }
 
-func mustHash(t *testing.T, password string) string {
+func newTestAuthServiceWithVerifier(t *testing.T) (service.AuthService, *mockrepository.MockUserRepository, *mockgoogleauth.MockVerifier) {
+	t.Helper()
+	repo := &mockrepository.MockUserRepository{}
+	verifier := &mockgoogleauth.MockVerifier{}
+	return service.NewAuthService(repo, testSecret, verifier), repo, verifier
+}
+
+func mustHash(t *testing.T, password string) *string {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	require.NoError(t, err)
-	return string(hash)
+	hashStr := string(hash)
+	return &hashStr
 }
 
 func TestSignUpSuccess(t *testing.T) {
@@ -54,8 +64,9 @@ func TestSignUpSuccess(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.NotEmpty(t, resp.Token)
 	assert.Equal(t, "jane@example.com", resp.User.Email)
-	assert.NotEqual(t, "supersecret123", resp.User.PasswordHash)
-	assert.NotEmpty(t, resp.User.PasswordHash)
+	require.NotNil(t, resp.User.PasswordHash)
+	assert.NotEqual(t, "supersecret123", *resp.User.PasswordHash)
+	assert.NotEmpty(t, *resp.User.PasswordHash)
 }
 
 func TestSignUpDuplicateEmail(t *testing.T) {
@@ -168,6 +179,110 @@ func TestValidateTokenGarbage(t *testing.T) {
 	assert.ErrorIs(t, err, service.ErrInvalidToken)
 }
 
+func TestSignInWithGoogleCreatesNewUser(t *testing.T) {
+	svc, repo, verifier := newTestAuthServiceWithVerifier(t)
+	ctx := context.Background()
+
+	verifier.VerifyFunc = func(ctx context.Context, idToken string) (*googleauth.Claims, error) {
+		assert.Equal(t, "google-id-token", idToken)
+		return &googleauth.Claims{Subject: "sub-1", Email: "New@Example.com", EmailVerified: true, Name: "New Person"}, nil
+	}
+	repo.FindByEmailFunc = func(ctx context.Context, email string) (*models.User, error) {
+		assert.Equal(t, "new@example.com", email)
+		return nil, repository.ErrUserNotFound
+	}
+	var created *models.User
+	repo.CreateFunc = func(ctx context.Context, u *models.User) error {
+		u.ID = "user-1"
+		u.CreatedAt = time.Now()
+		created = u
+		return nil
+	}
+
+	resp, err := svc.SignInWithGoogle(ctx, "google-id-token")
+
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.Nil(t, created.PasswordHash)
+	require.NotNil(t, created.GoogleSub)
+	assert.Equal(t, "sub-1", *created.GoogleSub)
+	assert.Equal(t, "new@example.com", resp.User.Email)
+	assert.NotEmpty(t, resp.Token)
+}
+
+func TestSignInWithGoogleLinksExistingPasswordAccount(t *testing.T) {
+	svc, repo, verifier := newTestAuthServiceWithVerifier(t)
+	ctx := context.Background()
+
+	existing := &models.User{ID: "user-1", Email: "both@example.com", PasswordHash: mustHash(t, "supersecret123")}
+	verifier.VerifyFunc = func(ctx context.Context, idToken string) (*googleauth.Claims, error) {
+		return &googleauth.Claims{Subject: "sub-2", Email: "both@example.com", EmailVerified: true, Name: "Both"}, nil
+	}
+	repo.FindByEmailFunc = func(ctx context.Context, email string) (*models.User, error) {
+		return existing, nil
+	}
+	var linkedUserID, linkedSub string
+	repo.LinkGoogleAccountFunc = func(ctx context.Context, userID, googleSub string) error {
+		linkedUserID, linkedSub = userID, googleSub
+		return nil
+	}
+
+	resp, err := svc.SignInWithGoogle(ctx, "google-id-token")
+
+	require.NoError(t, err)
+	assert.Equal(t, "user-1", linkedUserID)
+	assert.Equal(t, "sub-2", linkedSub)
+	assert.Equal(t, "user-1", resp.User.ID)
+}
+
+func TestSignInWithGoogleSkipsRelinkWhenAlreadyLinked(t *testing.T) {
+	svc, repo, verifier := newTestAuthServiceWithVerifier(t)
+	ctx := context.Background()
+
+	sub := "sub-3"
+	existing := &models.User{ID: "user-1", Email: "linked@example.com", GoogleSub: &sub}
+	verifier.VerifyFunc = func(ctx context.Context, idToken string) (*googleauth.Claims, error) {
+		return &googleauth.Claims{Subject: "sub-3", Email: "linked@example.com", EmailVerified: true}, nil
+	}
+	repo.FindByEmailFunc = func(ctx context.Context, email string) (*models.User, error) {
+		return existing, nil
+	}
+	relinkCalled := false
+	repo.LinkGoogleAccountFunc = func(ctx context.Context, userID, googleSub string) error {
+		relinkCalled = true
+		return nil
+	}
+
+	_, err := svc.SignInWithGoogle(ctx, "google-id-token")
+
+	require.NoError(t, err)
+	assert.False(t, relinkCalled, "should not re-link when google_sub already matches")
+}
+
+func TestSignInWithGoogleRejectsUnverifiedEmail(t *testing.T) {
+	svc, _, verifier := newTestAuthServiceWithVerifier(t)
+
+	verifier.VerifyFunc = func(ctx context.Context, idToken string) (*googleauth.Claims, error) {
+		return &googleauth.Claims{Subject: "sub-4", Email: "unverified@example.com", EmailVerified: false}, nil
+	}
+
+	_, err := svc.SignInWithGoogle(context.Background(), "google-id-token")
+
+	assert.ErrorIs(t, err, service.ErrGoogleEmailUnverified)
+}
+
+func TestSignInWithGoogleRejectsInvalidToken(t *testing.T) {
+	svc, _, verifier := newTestAuthServiceWithVerifier(t)
+
+	verifier.VerifyFunc = func(ctx context.Context, idToken string) (*googleauth.Claims, error) {
+		return nil, googleauth.ErrInvalidToken
+	}
+
+	_, err := svc.SignInWithGoogle(context.Background(), "bad-token")
+
+	assert.ErrorIs(t, err, service.ErrInvalidToken)
+}
+
 func TestValidateTokenWrongSecret(t *testing.T) {
 	ctx := context.Background()
 
@@ -181,12 +296,12 @@ func TestValidateTokenWrongSecret(t *testing.T) {
 			return nil
 		},
 	}
-	svcA := service.NewAuthService(repoA, "secret-a-aaaaaaaaaaaaaaaaaaaaaaaa")
+	svcA := service.NewAuthService(repoA, "secret-a-aaaaaaaaaaaaaaaaaaaaaaaa", &mockgoogleauth.MockVerifier{})
 	resp, err := svcA.SignUp(ctx, models.SignUpInput{Email: "x@example.com", Password: "supersecret123", Name: "X"})
 	require.NoError(t, err)
 
 	repoB := &mockrepository.MockUserRepository{}
-	svcB := service.NewAuthService(repoB, "secret-b-bbbbbbbbbbbbbbbbbbbbbbbb")
+	svcB := service.NewAuthService(repoB, "secret-b-bbbbbbbbbbbbbbbbbbbbbbbb", &mockgoogleauth.MockVerifier{})
 
 	_, err = svcB.ValidateToken(ctx, resp.Token)
 

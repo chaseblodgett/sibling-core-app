@@ -1,7 +1,8 @@
-import { Alert, Box, Button, Link, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Divider, Link, Paper, Stack, TextField, Typography } from "@mui/material";
 import { type FormEvent, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 import { useAuth } from "../context/AuthContext";
 import { cardRadius, singleShadowTier } from "../theme/theme";
 
@@ -15,7 +16,7 @@ interface FieldErrors {
 }
 
 export function SignupPage() {
-  const { signUp } = useAuth();
+  const { signUp, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
@@ -24,6 +25,16 @@ export function SignupPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  async function handleGoogleIdToken(idToken: string) {
+    setServerError(null);
+    try {
+      await loginWithGoogle(idToken);
+      navigate("/", { replace: true });
+    } catch (err) {
+      setServerError(err instanceof ApiError ? err.message : "Google sign-in failed. Try again.");
+    }
+  }
 
   function validate(): boolean {
     const errors: FieldErrors = {};
@@ -74,6 +85,10 @@ export function SignupPage() {
           </Box>
 
           {serverError && <Alert severity="error">{serverError}</Alert>}
+
+          <GoogleSignInButton text="signup_with" onIdToken={handleGoogleIdToken} />
+
+          <Divider>or</Divider>
 
           <TextField
             label="Full name"

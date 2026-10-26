@@ -1,10 +1,12 @@
-import { AppBar, Box, Button, Container, Stack, Toolbar, Typography } from "@mui/material";
+import { AppBar, Box, Button, Container, MenuItem, Select, Stack, Toolbar, Typography } from "@mui/material";
 import { Link as RouterLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useFamilies } from "../context/FamilyContext";
 
 const navItems = [
   { label: "Dashboard", to: "/" },
   { label: "Family", to: "/family" },
+  { label: "Parents", to: "/parents" },
   { label: "Tasks", to: "/tasks" },
   { label: "Expenses", to: "/expenses" },
   { label: "Documents", to: "/documents" },
@@ -12,6 +14,7 @@ const navItems = [
 
 export function Layout() {
   const { logout } = useAuth();
+  const { families, selectedFamilyId, setSelectedFamilyId } = useFamilies();
   const navigate = useNavigate();
 
   function handleLogout() {
@@ -29,7 +32,7 @@ export function Layout() {
             to="/"
             sx={{ flexGrow: 1, color: "inherit", textDecoration: "none", fontWeight: 700 }}
           >
-            Sibling Core
+            Caretree
           </Typography>
           <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
             {navItems.map((item) => (
@@ -42,6 +45,32 @@ export function Layout() {
             </Button>
           </Stack>
         </Toolbar>
+        {families.length > 0 && (
+          <Toolbar variant="dense" sx={{ borderTop: "1px solid", borderColor: "divider", minHeight: 44 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mr: 1.5 }}>
+              Viewing:
+            </Typography>
+            {families.length === 1 ? (
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {families[0].name}
+              </Typography>
+            ) : (
+              <Select
+                size="small"
+                value={selectedFamilyId ?? ""}
+                onChange={(e) => setSelectedFamilyId(e.target.value || null)}
+                sx={{ minWidth: 200 }}
+              >
+                <MenuItem value="">All families</MenuItem>
+                {families.map((f) => (
+                  <MenuItem key={f.id} value={f.id}>
+                    {f.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            )}
+          </Toolbar>
+        )}
       </AppBar>
       <Container component="main" sx={{ flexGrow: 1, py: 4 }}>
         <Outlet />

@@ -1,8 +1,9 @@
-import { Alert, Box, Button, Link, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Divider, Link, Paper, Stack, TextField, Typography } from "@mui/material";
 import { type FormEvent, useState } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import type { Location } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 import { useAuth } from "../context/AuthContext";
 import { cardRadius, singleShadowTier } from "../theme/theme";
 
@@ -14,7 +15,7 @@ interface FieldErrors {
 }
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -23,6 +24,18 @@ export function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const from = (location.state as { from?: Pick<Location, "pathname"> } | null)?.from;
+
+  async function handleGoogleIdToken(idToken: string) {
+    setServerError(null);
+    try {
+      await loginWithGoogle(idToken);
+      navigate(from?.pathname ?? "/", { replace: true });
+    } catch (err) {
+      setServerError(err instanceof ApiError ? err.message : "Google sign-in failed. Try again.");
+    }
+  }
 
   function validate(): boolean {
     const errors: FieldErrors = {};
@@ -46,7 +59,6 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      const from = (location.state as { from?: Pick<Location, "pathname"> } | null)?.from;
       navigate(from?.pathname ?? "/", { replace: true });
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
@@ -71,6 +83,10 @@ export function LoginPage() {
           </Box>
 
           {serverError && <Alert severity="error">{serverError}</Alert>}
+
+          <GoogleSignInButton text="signin_with" onIdToken={handleGoogleIdToken} />
+
+          <Divider>or</Divider>
 
           <TextField
             label="Email"

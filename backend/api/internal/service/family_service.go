@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
+	"sibling-core/api/internal/mailer"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 )
@@ -49,11 +51,12 @@ type familyService struct {
 	familyRepo repository.FamilyRepository
 	memberRepo repository.MemberRepository
 	userRepo   repository.UserRepository
+	mailer     mailer.Mailer
 }
 
 // NewFamilyService constructs a FamilyService.
-func NewFamilyService(familyRepo repository.FamilyRepository, memberRepo repository.MemberRepository, userRepo repository.UserRepository) FamilyService {
-	return &familyService{familyRepo: familyRepo, memberRepo: memberRepo, userRepo: userRepo}
+func NewFamilyService(familyRepo repository.FamilyRepository, memberRepo repository.MemberRepository, userRepo repository.UserRepository, mailService mailer.Mailer) FamilyService {
+	return &familyService{familyRepo: familyRepo, memberRepo: memberRepo, userRepo: userRepo, mailer: mailService}
 }
 
 func (s *familyService) CreateFamily(ctx context.Context, input models.CreateFamilyInput) (*models.Family, error) {
@@ -173,7 +176,38 @@ func (s *familyService) InviteMember(ctx context.Context, input models.InviteMem
 	if err := s.familyRepo.CreateInvite(ctx, invite); err != nil {
 		return nil, err
 	}
+
+	s.sendInviteEmail(ctx, invite)
+
 	return invite, nil
+}
+
+// sendInviteEmail looks up the context needed to render the invite email
+// and sends it. The invite is already persisted at this point, so a
+// failure here (bad Resend key, network blip, etc.) is logged rather than
+// returned — the owner can still hand the invite code to the sibling
+// directly, and the invite isn't lost.
+func (s *familyService) sendInviteEmail(ctx context.Context, invite *models.FamilyInvite) {
+	family, err := s.familyRepo.GetByID(ctx, invite.FamilyID)
+	if err != nil {
+		log.Printf("family invite email: couldn't load family %s: %v", invite.FamilyID, err)
+		return
+	}
+	inviter, err := s.userRepo.FindByID(ctx, invite.InvitedBy)
+	if err != nil {
+		log.Printf("family invite email: couldn't load inviter %s: %v", invite.InvitedBy, err)
+		return
+	}
+
+	err = s.mailer.SendFamilyInvite(ctx, mailer.FamilyInviteEmail{
+		To:          invite.Email,
+		FamilyName:  family.Name,
+		InviterName: inviter.Name,
+		InviteCode:  family.InviteCode,
+	})
+	if err != nil {
+		log.Printf("family invite email: send to %s failed: %v", invite.Email, err)
+	}
 }
 
 func (s *familyService) ListMembers(ctx context.Context, familyID string) ([]*models.Member, error) {

@@ -11,7 +11,7 @@ import (
 type MockTaskService struct {
 	CreateTaskFunc func(ctx context.Context, input models.CreateTaskInput) (*models.Task, error)
 	GetTaskFunc    func(ctx context.Context, id string) (*models.Task, error)
-	ListTasksFunc  func(ctx context.Context, familyID string) ([]*models.Task, error)
+	ListTasksFunc  func(ctx context.Context, familyID string, parentID *string) ([]*models.Task, error)
 	UpdateTaskFunc func(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error)
 	AssignTaskFunc func(ctx context.Context, id, memberID string) (*models.Task, error)
 	DeleteTaskFunc func(ctx context.Context, id string) error
@@ -31,11 +31,11 @@ func (m *MockTaskService) GetTask(ctx context.Context, id string) (*models.Task,
 	return m.GetTaskFunc(ctx, id)
 }
 
-func (m *MockTaskService) ListTasks(ctx context.Context, familyID string) ([]*models.Task, error) {
+func (m *MockTaskService) ListTasks(ctx context.Context, familyID string, parentID *string) ([]*models.Task, error) {
 	if m.ListTasksFunc == nil {
 		return nil, nil
 	}
-	return m.ListTasksFunc(ctx, familyID)
+	return m.ListTasksFunc(ctx, familyID, parentID)
 }
 
 func (m *MockTaskService) UpdateTask(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error) {

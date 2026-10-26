@@ -11,6 +11,7 @@ import (
 type Handlers struct {
 	Auth     *AuthHandler
 	Family   *FamilyHandler
+	Parent   *ParentHandler
 	Task     *TaskHandler
 	Expense  *ExpenseHandler
 	Document *DocumentHandler
@@ -27,6 +28,7 @@ func RegisterRoutes(e *echo.Echo, h *Handlers) {
 
 	h.Auth.RegisterRoutes(v1)
 	h.Family.RegisterRoutes(v1)
+	h.Parent.RegisterRoutes(v1)
 	h.Task.RegisterRoutes(v1)
 	h.Expense.RegisterRoutes(v1)
 	h.Document.RegisterRoutes(v1)

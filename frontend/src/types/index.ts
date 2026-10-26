@@ -30,6 +30,16 @@ export interface Member {
   joined_at: string;
 }
 
+export interface Parent {
+  id: string;
+  family_id: string;
+  name: string;
+  relation: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface Task {
@@ -39,6 +49,7 @@ export interface Task {
   description: string;
   status: TaskStatus;
   assignee_id?: string;
+  parent_id?: string;
   created_by: string;
   due_date?: string;
   created_at: string;
@@ -53,6 +64,7 @@ export interface Expense {
   amount_cents: number;
   currency: string;
   category: string;
+  parent_id?: string;
   incurred_at: string;
   created_at: string;
   updated_at: string;
@@ -76,9 +88,9 @@ export interface Document {
   family_id: string;
   uploaded_by: string;
   file_name: string;
-  storage_path: string;
   content_type: string;
   size_bytes: number;
+  parent_id?: string;
   created_at: string;
 }
 

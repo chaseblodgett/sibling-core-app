@@ -11,7 +11,7 @@ import (
 type MockDocumentRepository struct {
 	CreateFunc       func(ctx context.Context, document *models.Document) error
 	GetByIDFunc      func(ctx context.Context, id string) (*models.Document, error)
-	ListByFamilyFunc func(ctx context.Context, familyID string) ([]*models.Document, error)
+	ListByFamilyFunc func(ctx context.Context, familyID string, parentID *string) ([]*models.Document, error)
 	DeleteFunc       func(ctx context.Context, id string) error
 }
 
@@ -29,11 +29,11 @@ func (m *MockDocumentRepository) GetByID(ctx context.Context, id string) (*model
 	return m.GetByIDFunc(ctx, id)
 }
 
-func (m *MockDocumentRepository) ListByFamily(ctx context.Context, familyID string) ([]*models.Document, error) {
+func (m *MockDocumentRepository) ListByFamily(ctx context.Context, familyID string, parentID *string) ([]*models.Document, error) {
 	if m.ListByFamilyFunc == nil {
 		return nil, nil
 	}
-	return m.ListByFamilyFunc(ctx, familyID)
+	return m.ListByFamilyFunc(ctx, familyID, parentID)
 }
 
 func (m *MockDocumentRepository) Delete(ctx context.Context, id string) error {

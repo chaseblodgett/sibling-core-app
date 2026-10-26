@@ -2,23 +2,33 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"sibling-core/api/internal/mailer"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 	"sibling-core/api/internal/service"
+	mockmailer "sibling-core/api/test/mock/mock_mailer"
 	mockrepository "sibling-core/api/test/mock/mock_repository"
 )
 
 func newTestFamilyService(t *testing.T) (service.FamilyService, *mockrepository.MockFamilyRepository, *mockrepository.MockMemberRepository, *mockrepository.MockUserRepository) {
 	t.Helper()
+	svc, familyRepo, memberRepo, userRepo, _ := newTestFamilyServiceWithMailer(t)
+	return svc, familyRepo, memberRepo, userRepo
+}
+
+func newTestFamilyServiceWithMailer(t *testing.T) (service.FamilyService, *mockrepository.MockFamilyRepository, *mockrepository.MockMemberRepository, *mockrepository.MockUserRepository, *mockmailer.MockMailer) {
+	t.Helper()
 	familyRepo := &mockrepository.MockFamilyRepository{}
 	memberRepo := &mockrepository.MockMemberRepository{}
 	userRepo := &mockrepository.MockUserRepository{}
-	return service.NewFamilyService(familyRepo, memberRepo, userRepo), familyRepo, memberRepo, userRepo
+	mail := &mockmailer.MockMailer{}
+	return service.NewFamilyService(familyRepo, memberRepo, userRepo, mail), familyRepo, memberRepo, userRepo, mail
 }
 
 func TestCreateFamilySuccess(t *testing.T) {
@@ -173,12 +183,26 @@ func TestJoinFamilyInvalidCode(t *testing.T) {
 }
 
 func TestInviteMemberSuccess(t *testing.T) {
-	svc, familyRepo, _, _ := newTestFamilyService(t)
+	svc, familyRepo, _, userRepo, mail := newTestFamilyServiceWithMailer(t)
 
 	var created *models.FamilyInvite
 	familyRepo.CreateInviteFunc = func(ctx context.Context, invite *models.FamilyInvite) error {
 		invite.ID = "invite-1"
 		created = invite
+		return nil
+	}
+	familyRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Family, error) {
+		return &models.Family{ID: id, Name: "The Does", InviteCode: "ABCD2345"}, nil
+	}
+	userRepo.FindByIDFunc = func(ctx context.Context, id string) (*models.User, error) {
+		return &models.User{ID: id, Name: "Owner Person"}, nil
+	}
+
+	var sent mailer.FamilyInviteEmail
+	sendCalled := false
+	mail.SendFamilyInviteFunc = func(ctx context.Context, email mailer.FamilyInviteEmail) error {
+		sendCalled = true
+		sent = email
 		return nil
 	}
 
@@ -192,6 +216,39 @@ func TestInviteMemberSuccess(t *testing.T) {
 	require.NotNil(t, created)
 	assert.Equal(t, "sibling@example.com", invite.Email)
 	assert.Equal(t, "pending", invite.Status)
+
+	require.True(t, sendCalled)
+	assert.Equal(t, "sibling@example.com", sent.To)
+	assert.Equal(t, "The Does", sent.FamilyName)
+	assert.Equal(t, "ABCD2345", sent.InviteCode)
+	assert.Equal(t, "Owner Person", sent.InviterName)
+}
+
+func TestInviteMemberSucceedsEvenIfEmailSendFails(t *testing.T) {
+	svc, familyRepo, _, userRepo, mail := newTestFamilyServiceWithMailer(t)
+
+	familyRepo.CreateInviteFunc = func(ctx context.Context, invite *models.FamilyInvite) error {
+		invite.ID = "invite-1"
+		return nil
+	}
+	familyRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Family, error) {
+		return &models.Family{ID: id, Name: "The Does", InviteCode: "ABCD2345"}, nil
+	}
+	userRepo.FindByIDFunc = func(ctx context.Context, id string) (*models.User, error) {
+		return &models.User{ID: id, Name: "Owner Person"}, nil
+	}
+	mail.SendFamilyInviteFunc = func(ctx context.Context, email mailer.FamilyInviteEmail) error {
+		return errors.New("resend is down")
+	}
+
+	invite, err := svc.InviteMember(context.Background(), models.InviteMemberInput{
+		FamilyID:  "family-1",
+		Email:     "sibling@example.com",
+		InvitedBy: "user-1",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "sibling@example.com", invite.Email)
 }
 
 func TestInviteMemberInvalidEmail(t *testing.T) {

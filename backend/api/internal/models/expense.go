@@ -12,6 +12,7 @@ type Expense struct {
 	AmountCents int64     `json:"amount_cents" db:"amount_cents"`
 	Currency    string    `json:"currency" db:"currency"`
 	Category    string    `json:"category" db:"category"`
+	ParentID    *string   `json:"parent_id,omitempty" db:"parent_id"`
 	IncurredAt  time.Time `json:"incurred_at" db:"incurred_at"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
@@ -31,11 +32,16 @@ type SplitRequest struct {
 }
 
 // CreateExpenseRequest is the JSON body for POST /families/:familyId/expenses.
+// PaidBy defaults to the requester's own member id when omitted — most
+// expenses are logged by whoever actually paid — but can name a different
+// member (e.g. logging a sibling's receipt on their behalf).
 type CreateExpenseRequest struct {
 	Description string         `json:"description"`
 	AmountCents int64          `json:"amount_cents"`
 	Currency    string         `json:"currency"`
 	Category    string         `json:"category"`
+	ParentID    *string        `json:"parent_id,omitempty"`
+	PaidBy      *string        `json:"paid_by,omitempty"`
 	Splits      []SplitRequest `json:"splits"`
 }
 
@@ -45,7 +51,10 @@ type SplitInput struct {
 	ShareCents int64
 }
 
-// CreateExpenseInput carries the fields needed to log a new expense and how it's split.
+// CreateExpenseInput carries the fields needed to log a new expense and
+// how it's split. PaidBy and each Splits[i].MemberID are member ids
+// (expenses.paid_by/expense_splits.member_id reference members, not
+// users) — the handler must resolve ids for the family, same as Task.
 type CreateExpenseInput struct {
 	FamilyID    string
 	PaidBy      string
@@ -53,5 +62,6 @@ type CreateExpenseInput struct {
 	AmountCents int64
 	Currency    string
 	Category    string
+	ParentID    *string
 	Splits      []SplitInput
 }

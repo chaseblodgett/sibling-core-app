@@ -10,6 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"sibling-core/api/internal/googleauth"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 )
@@ -23,10 +24,11 @@ import (
 const tokenTTL = 7 * 24 * time.Hour
 
 var (
-	ErrEmailTaken         = errors.New("email already registered")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInvalidInput       = errors.New("invalid input")
-	ErrInvalidToken       = errors.New("invalid or expired token")
+	ErrEmailTaken            = errors.New("email already registered")
+	ErrInvalidCredentials    = errors.New("invalid email or password")
+	ErrInvalidInput          = errors.New("invalid input")
+	ErrInvalidToken          = errors.New("invalid or expired token")
+	ErrGoogleEmailUnverified = errors.New("google account email is not verified")
 )
 
 // AuthService handles account creation, authentication, and JWT validation.
@@ -34,16 +36,21 @@ type AuthService interface {
 	SignUp(ctx context.Context, input models.SignUpInput) (*models.AuthResponse, error)
 	Login(ctx context.Context, input models.LoginInput) (*models.AuthResponse, error)
 	ValidateToken(ctx context.Context, token string) (*models.User, error)
+	// SignInWithGoogle verifies a Google ID token and signs the user in,
+	// creating an account (or linking an existing password account by
+	// verified email) on first sign-in.
+	SignInWithGoogle(ctx context.Context, idToken string) (*models.AuthResponse, error)
 }
 
 type authService struct {
-	userRepo  repository.UserRepository
-	jwtSecret []byte
+	userRepo       repository.UserRepository
+	jwtSecret      []byte
+	googleVerifier googleauth.Verifier
 }
 
 // NewAuthService constructs an AuthService.
-func NewAuthService(userRepo repository.UserRepository, jwtSecret string) AuthService {
-	return &authService{userRepo: userRepo, jwtSecret: []byte(jwtSecret)}
+func NewAuthService(userRepo repository.UserRepository, jwtSecret string, googleVerifier googleauth.Verifier) AuthService {
+	return &authService{userRepo: userRepo, jwtSecret: []byte(jwtSecret), googleVerifier: googleVerifier}
 }
 
 func (s *authService) SignUp(ctx context.Context, input models.SignUpInput) (*models.AuthResponse, error) {
@@ -65,10 +72,11 @@ func (s *authService) SignUp(ctx context.Context, input models.SignUpInput) (*mo
 	if err != nil {
 		return nil, err
 	}
+	hashStr := string(hash)
 
 	user := &models.User{
 		Email:        email,
-		PasswordHash: string(hash),
+		PasswordHash: &hashStr,
 		Name:         strings.TrimSpace(input.Name),
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
@@ -92,8 +100,51 @@ func (s *authService) Login(ctx context.Context, input models.LoginInput) (*mode
 		return nil, err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+	if user.PasswordHash == nil {
+		// Google-only account — no password to compare against. Same
+		// error as a wrong password, so we don't leak how the account
+		// was created to an unauthenticated caller.
 		return nil, ErrInvalidCredentials
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(input.Password)); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	return s.authResponse(user)
+}
+
+func (s *authService) SignInWithGoogle(ctx context.Context, idToken string) (*models.AuthResponse, error) {
+	claims, err := s.googleVerifier.Verify(ctx, idToken)
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+	if !claims.EmailVerified {
+		return nil, ErrGoogleEmailUnverified
+	}
+
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+		return nil, err
+	}
+
+	if user == nil {
+		user = &models.User{
+			Email:     email,
+			Name:      claims.Name,
+			GoogleSub: &claims.Subject,
+		}
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			return nil, err
+		}
+	} else if user.GoogleSub == nil || *user.GoogleSub != claims.Subject {
+		// First Google sign-in on a pre-existing password account: link it.
+		// Safe because Google has already told us this email is verified.
+		if err := s.userRepo.LinkGoogleAccount(ctx, user.ID, claims.Subject); err != nil {
+			return nil, err
+		}
+		user.GoogleSub = &claims.Subject
 	}
 
 	return s.authResponse(user)

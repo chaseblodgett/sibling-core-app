@@ -83,6 +83,43 @@ func TestAuthHandlerLoginInvalidCredentials(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestAuthHandlerGoogleSignInSuccess(t *testing.T) {
+	authSvc := &mockservice.MockAuthService{
+		SignInWithGoogleFunc: func(ctx context.Context, idToken string) (*models.AuthResponse, error) {
+			assert.Equal(t, "a-google-id-token", idToken)
+			return &models.AuthResponse{Token: "tok", User: &models.User{ID: "u1", Email: "jane@example.com", Name: "Jane"}}, nil
+		},
+	}
+	h := handler.NewAuthHandler(authSvc)
+
+	c, rec := newTestContext(http.MethodPost, "/auth/google", `{"id_token":"a-google-id-token"}`)
+
+	err := h.GoogleSignIn(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var body models.AuthResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "tok", body.Token)
+}
+
+func TestAuthHandlerGoogleSignInInvalidToken(t *testing.T) {
+	authSvc := &mockservice.MockAuthService{
+		SignInWithGoogleFunc: func(ctx context.Context, idToken string) (*models.AuthResponse, error) {
+			return nil, service.ErrInvalidToken
+		},
+	}
+	h := handler.NewAuthHandler(authSvc)
+
+	c, rec := newTestContext(http.MethodPost, "/auth/google", `{"id_token":"bad"}`)
+
+	err := h.GoogleSignIn(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
 func TestAuthHandlerMeWithMiddleware(t *testing.T) {
 	user := &models.User{ID: "u1", Email: "jane@example.com", Name: "Jane"}
 	authSvc := &mockservice.MockAuthService{

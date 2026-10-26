@@ -13,6 +13,12 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// GoogleSignInRequest is the JSON body for POST /auth/google. IDToken is
+// the credential returned by Google Identity Services on the frontend.
+type GoogleSignInRequest struct {
+	IDToken string `json:"id_token"`
+}
+
 // SignUpInput carries the fields needed to register a new user.
 type SignUpInput struct {
 	Email    string

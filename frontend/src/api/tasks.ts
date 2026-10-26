@@ -5,6 +5,7 @@ export interface CreateTaskPayload {
   title: string;
   description: string;
   assignee_id?: string;
+  parent_id?: string;
 }
 
 export interface UpdateTaskPayload {
@@ -12,10 +13,14 @@ export interface UpdateTaskPayload {
   description?: string;
   status?: Task["status"];
   assignee_id?: string;
+  parent_id?: string;
 }
 
 export const tasksApi = {
-  list: (familyId: string) => apiClient.get<Task[]>(`/families/${familyId}/tasks`),
+  list: (familyId: string, parentId?: string) =>
+    apiClient.get<Task[]>(
+      `/families/${familyId}/tasks${parentId ? `?parent_id=${encodeURIComponent(parentId)}` : ""}`,
+    ),
   create: (familyId: string, payload: CreateTaskPayload) =>
     apiClient.post<Task>(`/families/${familyId}/tasks`, payload),
   get: (id: string) => apiClient.get<Task>(`/tasks/${id}`),

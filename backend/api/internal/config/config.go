@@ -15,6 +15,9 @@ type Config struct {
 	SupabaseAnonKey    string
 	SupabaseServiceKey string
 	JWTSecret          string
+	ResendAPIKey       string // optional — invite emails are skipped (logged) when unset
+	ResendFromEmail    string
+	GoogleClientID     string // not secret — also embedded in frontend code
 }
 
 // Load reads configuration from environment variables, applying sane
@@ -28,6 +31,9 @@ func Load() (*Config, error) {
 		SupabaseAnonKey:    os.Getenv("SUPABASE_ANON_KEY"),
 		SupabaseServiceKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
+		ResendAPIKey:       os.Getenv("RESEND_API_KEY"),
+		ResendFromEmail:    getEnv("RESEND_FROM_EMAIL", "Caretree <onboarding@resend.dev>"),
+		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 	}
 
 	if cfg.DatabaseURL == "" {

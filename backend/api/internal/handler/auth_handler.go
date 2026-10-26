@@ -26,6 +26,7 @@ func NewAuthHandler(authService service.AuthService) *AuthHandler {
 func (h *AuthHandler) RegisterRoutes(g *echo.Group) {
 	g.POST("/auth/signup", h.SignUp)
 	g.POST("/auth/login", h.Login)
+	g.POST("/auth/google", h.GoogleSignIn)
 	g.GET("/auth/me", h.Me, middleware.RequireAuth(h.authService))
 }
 
@@ -68,6 +69,23 @@ func (h *AuthHandler) Login(c *echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
+// GoogleSignIn verifies a Google ID token and signs the user in, creating
+// an account on first sign-in.
+func (h *AuthHandler) GoogleSignIn(c *echo.Context) error {
+	var req models.GoogleSignInRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: err.Error()})
+	}
+
+	result, err := h.authService.SignInWithGoogle(c.Request().Context(), req.IDToken)
+	if err != nil {
+		status, msg := mapAuthError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
 // Me returns the currently authenticated user, as attached by RequireAuth.
 func (h *AuthHandler) Me(c *echo.Context) error {
 	return c.JSON(http.StatusOK, middleware.CurrentUser(c))
@@ -81,6 +99,10 @@ func mapAuthError(err error) (int, string) {
 		return http.StatusConflict, err.Error()
 	case errors.Is(err, service.ErrInvalidCredentials):
 		return http.StatusUnauthorized, err.Error()
+	case errors.Is(err, service.ErrInvalidToken):
+		return http.StatusUnauthorized, err.Error()
+	case errors.Is(err, service.ErrGoogleEmailUnverified):
+		return http.StatusBadRequest, err.Error()
 	default:
 		return http.StatusInternalServerError, "internal server error"
 	}

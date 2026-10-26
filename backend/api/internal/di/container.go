@@ -12,9 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sibling-core/api/internal/config"
+	"sibling-core/api/internal/googleauth"
 	"sibling-core/api/internal/handler"
+	"sibling-core/api/internal/mailer"
 	"sibling-core/api/internal/repository"
 	"sibling-core/api/internal/service"
+	"sibling-core/api/internal/storage"
 )
 
 // Container holds every wired dependency needed to run the API server.
@@ -40,23 +43,35 @@ func Build(ctx context.Context) (*Container, error) {
 	userRepo := repository.NewUserRepository(db)
 	familyRepo := repository.NewFamilyRepository(db)
 	memberRepo := repository.NewMemberRepository(db)
+	parentRepo := repository.NewParentRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
 	expenseRepo := repository.NewExpenseRepository(db)
 	documentRepo := repository.NewDocumentRepository(db)
 
-	authService := service.NewAuthService(userRepo, cfg.JWTSecret)
-	familyService := service.NewFamilyService(familyRepo, memberRepo, userRepo)
-	taskService := service.NewTaskService(taskRepo)
-	expenseService := service.NewExpenseService(expenseRepo)
-	documentService := service.NewDocumentService(documentRepo)
+	var mailService mailer.Mailer
+	if cfg.ResendAPIKey != "" {
+		mailService = mailer.NewResendMailer(cfg.ResendAPIKey, cfg.ResendFromEmail)
+	} else {
+		mailService = mailer.NewNoopMailer()
+	}
+
+	googleVerifier := googleauth.NewVerifier(cfg.GoogleClientID)
+	authService := service.NewAuthService(userRepo, cfg.JWTSecret, googleVerifier)
+	familyService := service.NewFamilyService(familyRepo, memberRepo, userRepo, mailService)
+	parentService := service.NewParentService(parentRepo)
+	taskService := service.NewTaskService(taskRepo, memberRepo, parentRepo)
+	expenseService := service.NewExpenseService(expenseRepo, memberRepo, parentRepo)
+	fileStorage := storage.NewSupabaseStorage(cfg.SupabaseURL, cfg.SupabaseServiceKey)
+	documentService := service.NewDocumentService(documentRepo, parentRepo, fileStorage)
 
 	// Handlers
 	handlers := &handler.Handlers{
 		Auth:     handler.NewAuthHandler(authService),
 		Family:   handler.NewFamilyHandler(familyService, authService),
-		Task:     handler.NewTaskHandler(taskService),
-		Expense:  handler.NewExpenseHandler(expenseService),
-		Document: handler.NewDocumentHandler(documentService),
+		Parent:   handler.NewParentHandler(parentService, familyService, authService),
+		Task:     handler.NewTaskHandler(taskService, familyService, authService),
+		Expense:  handler.NewExpenseHandler(expenseService, familyService, authService),
+		Document: handler.NewDocumentHandler(documentService, familyService, authService),
 	}
 
 	return &Container{

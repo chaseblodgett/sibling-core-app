@@ -11,9 +11,11 @@ import (
 type MockExpenseService struct {
 	CreateExpenseFunc func(ctx context.Context, input models.CreateExpenseInput) (*models.Expense, error)
 	GetExpenseFunc    func(ctx context.Context, id string) (*models.Expense, error)
-	ListExpensesFunc  func(ctx context.Context, familyID string) ([]*models.Expense, error)
+	ListExpensesFunc  func(ctx context.Context, familyID string, parentID *string) ([]*models.Expense, error)
 	DeleteExpenseFunc func(ctx context.Context, id string) error
-	SettleSplitFunc   func(ctx context.Context, splitID string) error
+	ListSplitsFunc    func(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error)
+	GetSplitFunc      func(ctx context.Context, id string) (*models.ExpenseSplit, error)
+	SettleSplitFunc   func(ctx context.Context, splitID string) (*models.ExpenseSplit, error)
 	GetBalancesFunc   func(ctx context.Context, familyID string) ([]*models.Balance, error)
 }
 
@@ -31,11 +33,11 @@ func (m *MockExpenseService) GetExpense(ctx context.Context, id string) (*models
 	return m.GetExpenseFunc(ctx, id)
 }
 
-func (m *MockExpenseService) ListExpenses(ctx context.Context, familyID string) ([]*models.Expense, error) {
+func (m *MockExpenseService) ListExpenses(ctx context.Context, familyID string, parentID *string) ([]*models.Expense, error) {
 	if m.ListExpensesFunc == nil {
 		return nil, nil
 	}
-	return m.ListExpensesFunc(ctx, familyID)
+	return m.ListExpensesFunc(ctx, familyID, parentID)
 }
 
 func (m *MockExpenseService) DeleteExpense(ctx context.Context, id string) error {
@@ -45,9 +47,23 @@ func (m *MockExpenseService) DeleteExpense(ctx context.Context, id string) error
 	return m.DeleteExpenseFunc(ctx, id)
 }
 
-func (m *MockExpenseService) SettleSplit(ctx context.Context, splitID string) error {
+func (m *MockExpenseService) ListSplits(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error) {
+	if m.ListSplitsFunc == nil {
+		return nil, nil
+	}
+	return m.ListSplitsFunc(ctx, expenseID)
+}
+
+func (m *MockExpenseService) GetSplit(ctx context.Context, id string) (*models.ExpenseSplit, error) {
+	if m.GetSplitFunc == nil {
+		return nil, nil
+	}
+	return m.GetSplitFunc(ctx, id)
+}
+
+func (m *MockExpenseService) SettleSplit(ctx context.Context, splitID string) (*models.ExpenseSplit, error) {
 	if m.SettleSplitFunc == nil {
-		return nil
+		return nil, nil
 	}
 	return m.SettleSplitFunc(ctx, splitID)
 }

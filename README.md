@@ -1,4 +1,4 @@
-# Sibling Core
+# Caretree
 
 A family coordination app: task board, expense splitting, and shared documents.
 
