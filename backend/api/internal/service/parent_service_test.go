@@ -71,6 +71,36 @@ func TestUpdateParentPartial(t *testing.T) {
 	assert.Equal(t, "Stepmom", parent.Relation)
 }
 
+func TestUpdateParentKeyInfo(t *testing.T) {
+	svc, repo := newTestParentService(t)
+
+	repo.GetByIDFunc = func(ctx context.Context, id string) (*models.Parent, error) {
+		return &models.Parent{ID: id, Name: "Linda Doe", Relation: "Mom"}, nil
+	}
+	var updated *models.Parent
+	repo.UpdateFunc = func(ctx context.Context, p *models.Parent) error {
+		updated = p
+		return nil
+	}
+
+	doctorName := "  Dr. Patel "
+	allergies := " Penicillin "
+	emergencyPhone := " 555-0100 "
+	parent, err := svc.UpdateParent(context.Background(), "parent-1", models.UpdateParentInput{
+		DoctorName:            &doctorName,
+		Allergies:             &allergies,
+		EmergencyContactPhone: &emergencyPhone,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, "Dr. Patel", parent.DoctorName)
+	assert.Equal(t, "Penicillin", parent.Allergies)
+	assert.Equal(t, "555-0100", parent.EmergencyContactPhone)
+	assert.Equal(t, "", parent.Medications, "fields not provided should stay unchanged")
+	assert.Equal(t, "Linda Doe", parent.Name, "name should be unchanged when not provided")
+}
+
 func TestUpdateParentRejectsBlankName(t *testing.T) {
 	svc, repo := newTestParentService(t)
 

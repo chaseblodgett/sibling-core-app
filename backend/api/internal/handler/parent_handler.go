@@ -125,8 +125,16 @@ func (h *ParentHandler) UpdateParent(c *echo.Context) error {
 	}
 
 	updated, err := h.parentService.UpdateParent(ctx, parent.ID, models.UpdateParentInput{
-		Name:     req.Name,
-		Relation: req.Relation,
+		Name:                  req.Name,
+		Relation:              req.Relation,
+		DoctorName:            req.DoctorName,
+		DoctorPhone:           req.DoctorPhone,
+		Allergies:             req.Allergies,
+		Medications:           req.Medications,
+		InsuranceProvider:     req.InsuranceProvider,
+		InsuranceMemberID:     req.InsuranceMemberID,
+		EmergencyContactName:  req.EmergencyContactName,
+		EmergencyContactPhone: req.EmergencyContactPhone,
 	})
 	if err != nil {
 		status, msg := mapParentError(err)

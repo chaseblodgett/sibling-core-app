@@ -1,12 +1,12 @@
 import { apiClient } from "./client";
-import type { Parent } from "../types";
+import type { Parent, ParentKeyInfo } from "../types";
 
 export interface CreateParentPayload {
   name: string;
   relation: string;
 }
 
-export interface UpdateParentPayload {
+export interface UpdateParentPayload extends Partial<ParentKeyInfo> {
   name?: string;
   relation?: string;
 }

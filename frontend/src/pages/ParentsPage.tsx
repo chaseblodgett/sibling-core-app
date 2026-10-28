@@ -1,4 +1,5 @@
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import MedicalInformationIcon from "@mui/icons-material/MedicalInformation";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import {
   Alert,
@@ -6,11 +7,9 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   IconButton,
   Link,
-  List,
-  ListItem,
-  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -26,6 +25,7 @@ import { parentsApi } from "../api/parents";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { FamilySection } from "../components/FamilySection";
+import { ParentKeyInfo } from "../components/ParentKeyInfo";
 import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
 import { useNotify } from "../context/NotificationContext";
@@ -49,6 +49,7 @@ export function ParentsPage() {
   const [relation, setRelation] = useState("");
   const [createFamilyId, setCreateFamilyId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = useCallback(async (targets: Family[]) => {
     if (targets.length === 0) {
@@ -202,34 +203,49 @@ export function ParentsPage() {
                   description="Add the person this family is coordinating care for, using the form above."
                 />
               ) : (
-                <List>
-                  {familyParents.map((parent) => (
-                    <ListItem
-                      key={parent.id}
-                      secondaryAction={
-                        isOwnerOf(parent.family_id) && (
-                          <IconButton edge="end" aria-label="Remove parent" onClick={() => confirmDelete(parent)}>
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        )
-                      }
-                    >
-                      <ListItemText
-                        primary={
-                          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                            <span>{parent.name}</span>
-                            {parent.relation && <Chip label={parent.relation} size="small" />}
+                <Stack divider={<Box sx={{ borderBottom: 1, borderColor: "divider" }} />}>
+                  {familyParents.map((parent) => {
+                    const expanded = expandedId === parent.id;
+                    return (
+                      <Box key={parent.id} sx={{ px: 2, py: 1 }}>
+                        <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                          <Box>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                              <span>{parent.name}</span>
+                              {parent.relation && <Chip label={parent.relation} size="small" />}
+                            </Stack>
+                            <Link component={RouterLink} to={`/tasks?parent_id=${parent.id}`} variant="body2">
+                              View tasks
+                            </Link>
+                          </Box>
+                          <Stack direction="row" spacing={0.5}>
+                            <IconButton
+                              edge="end"
+                              aria-label={expanded ? "Hide key info" : "Show key info"}
+                              onClick={() => setExpandedId(expanded ? null : parent.id)}
+                              color={expanded ? "primary" : "default"}
+                            >
+                              <MedicalInformationIcon fontSize="small" />
+                            </IconButton>
+                            {isOwnerOf(parent.family_id) && (
+                              <IconButton edge="end" aria-label="Remove parent" onClick={() => confirmDelete(parent)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            )}
                           </Stack>
-                        }
-                        secondary={
-                          <Link component={RouterLink} to={`/tasks?parent_id=${parent.id}`}>
-                            View tasks
-                          </Link>
-                        }
-                      />
-                    </ListItem>
-                  ))}
-                </List>
+                        </Stack>
+                        <Collapse in={expanded} unmountOnExit>
+                          <ParentKeyInfo
+                            parent={parent}
+                            onSaved={(updated) =>
+                              setParents((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+                            }
+                          />
+                        </Collapse>
+                      </Box>
+                    );
+                  })}
+                </Stack>
               )}
             </FamilySection>
           );

@@ -80,7 +80,7 @@ func (r *postgresParentRepository) ListByFamily(ctx context.Context, familyID st
 	parents := make([]*models.Parent, 0)
 	for rows.Next() {
 		var p models.Parent
-		if err := rows.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Relation, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := scanParentRow(rows, &p); err != nil {
 			return nil, err
 		}
 		parents = append(parents, &p)
@@ -91,9 +91,17 @@ func (r *postgresParentRepository) ListByFamily(ctx context.Context, familyID st
 func (r *postgresParentRepository) Update(ctx context.Context, parent *models.Parent) error {
 	query, args, err := dialect.Update(parentsTable).
 		Set(goqu.Record{
-			"name":       parent.Name,
-			"relation":   parent.Relation,
-			"updated_at": goqu.L("now()"),
+			"name":                    parent.Name,
+			"relation":                parent.Relation,
+			"doctor_name":             parent.DoctorName,
+			"doctor_phone":            parent.DoctorPhone,
+			"allergies":               parent.Allergies,
+			"medications":             parent.Medications,
+			"insurance_provider":      parent.InsuranceProvider,
+			"insurance_member_id":     parent.InsuranceMemberID,
+			"emergency_contact_name":  parent.EmergencyContactName,
+			"emergency_contact_phone": parent.EmergencyContactPhone,
+			"updated_at":              goqu.L("now()"),
 		}).
 		Where(goqu.Ex{"id": parent.ID}).
 		Returning("updated_at").
@@ -127,12 +135,32 @@ func (r *postgresParentRepository) Delete(ctx context.Context, id string) error 
 
 func parentSelectDataset() *goqu.SelectDataset {
 	return dialect.From(parentsTable).
-		Select("id", "family_id", "name", "relation", "created_by", "created_at", "updated_at")
+		Select(
+			"id", "family_id", "name", "relation",
+			"doctor_name", "doctor_phone", "allergies", "medications",
+			"insurance_provider", "insurance_member_id",
+			"emergency_contact_name", "emergency_contact_phone",
+			"created_by", "created_at", "updated_at",
+		)
+}
+
+type parentScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanParentRow(row parentScanner, p *models.Parent) error {
+	return row.Scan(
+		&p.ID, &p.FamilyID, &p.Name, &p.Relation,
+		&p.DoctorName, &p.DoctorPhone, &p.Allergies, &p.Medications,
+		&p.InsuranceProvider, &p.InsuranceMemberID,
+		&p.EmergencyContactName, &p.EmergencyContactPhone,
+		&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
+	)
 }
 
 func scanParent(row pgx.Row) (*models.Parent, error) {
 	var p models.Parent
-	if err := row.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Relation, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := scanParentRow(row, &p); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrParentNotFound
 		}

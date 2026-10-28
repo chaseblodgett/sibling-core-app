@@ -35,9 +35,28 @@ export interface Parent {
   family_id: string;
   name: string;
   relation: string;
+  doctor_name: string;
+  doctor_phone: string;
+  allergies: string;
+  medications: string;
+  insurance_provider: string;
+  insurance_member_id: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ParentKeyInfo {
+  doctor_name: string;
+  doctor_phone: string;
+  allergies: string;
+  medications: string;
+  insurance_provider: string;
+  insurance_member_id: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
 }
 
 export type TaskStatus = "todo" | "in_progress" | "done";
