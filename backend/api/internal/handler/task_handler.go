@@ -60,12 +60,14 @@ func (h *TaskHandler) CreateTask(c *echo.Context) error {
 	}
 
 	task, err := h.taskService.CreateTask(ctx, models.CreateTaskInput{
-		FamilyID:    familyID,
-		Title:       req.Title,
-		Description: req.Description,
-		AssigneeID:  req.AssigneeID,
-		ParentID:    req.ParentID,
-		CreatedBy:   requester.ID,
+		FamilyID:       familyID,
+		Title:          req.Title,
+		Description:    req.Description,
+		AssigneeID:     req.AssigneeID,
+		ParentID:       req.ParentID,
+		CreatedBy:      requester.ID,
+		DueDate:        req.DueDate,
+		RecurrenceRule: req.RecurrenceRule,
 	})
 	if err != nil {
 		status, msg := mapTaskError(err)
@@ -137,11 +139,13 @@ func (h *TaskHandler) UpdateTask(c *echo.Context) error {
 	}
 
 	updated, err := h.taskService.UpdateTask(ctx, task.ID, models.UpdateTaskInput{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
-		AssigneeID:  req.AssigneeID,
-		ParentID:    req.ParentID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Status:         req.Status,
+		AssigneeID:     req.AssigneeID,
+		ParentID:       req.ParentID,
+		DueDate:        req.DueDate,
+		RecurrenceRule: req.RecurrenceRule,
 	})
 	if err != nil {
 		status, msg := mapTaskError(err)

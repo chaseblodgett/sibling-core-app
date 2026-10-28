@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.tsx";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import { FamilyProvider } from "./context/FamilyContext.tsx";
+import { NotificationProvider } from "./context/NotificationContext.tsx";
 import { theme } from "./theme/theme.ts";
 
 createRoot(document.getElementById("root")!).render(
@@ -13,11 +14,13 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <BrowserRouter>
-        <AuthProvider>
-          <FamilyProvider>
-            <App />
-          </FamilyProvider>
-        </AuthProvider>
+        <NotificationProvider>
+          <AuthProvider>
+            <FamilyProvider>
+              <App />
+            </FamilyProvider>
+          </AuthProvider>
+        </NotificationProvider>
       </BrowserRouter>
     </ThemeProvider>
   </StrictMode>,

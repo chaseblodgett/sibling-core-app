@@ -819,3 +819,114 @@ Notion's geometry is sober-editorial — `{rounded.md}` (8px) buttons distinguis
 - Animation/transition timings not extracted; recommend 150–200ms ease
 - Form validation success state not explicitly captured
 - Pastel-tint mapping (which feature uses which tint) is observation-based — the actual brand library may have more entries
+
+---
+
+# App UX Patterns (Caretree)
+
+Everything above this line is the source design-token analysis the app's
+visual system was derived from (Notion marketing site). Everything below
+documents interaction patterns adopted in the authenticated app itself —
+MUI v9 + Emotion, built on top of the tokens above. These aren't visual
+tokens; they're reusable UX conventions every new page/feature should
+follow.
+
+**Why these exist:** a UI-robustness pass (Oct 2026) found the app had
+functioning CRUD everywhere but none of the connective tissue that makes
+an app feel trustworthy — no confirmation before destructive actions, no
+feedback after an action succeeded, bare "No X yet" text instead of real
+empty states, and no indication of what a brand-new user should do first.
+The patterns below fix each of those, as small shared components rather
+than one-off page code, so the next page gets them for free.
+
+### Destructive-action confirmation (`useConfirm` + `ConfirmDialog`)
+
+Every delete/remove action in the app (parent, task, expense, document,
+family member) goes through this pair instead of firing immediately on
+click.
+
+- `hooks/useConfirm.ts` — holds the pending confirmation as state
+  (`title`, `message`, `confirmLabel`, `destructive`, `onConfirm`), with
+  `confirm(opts)` to open it and `handleConfirm()`/`close()` to resolve it.
+- `components/ConfirmDialog.tsx` — a MUI `Dialog` rendered from that
+  state. `destructive` switches the confirm button to `color="error"`.
+
+Usage pattern (identical across every page that has a delete):
+```tsx
+const { state: confirmState, confirm, close: closeConfirm, handleConfirm } = useConfirm();
+
+function confirmDelete(item) {
+  confirm({
+    title: "Delete X?",
+    message: `Delete "${item.name}"? This can't be undone.`,
+    confirmLabel: "Delete",
+    destructive: true,
+    onConfirm: () => handleDelete(item.id),
+  });
+}
+```
+The dialog message should say what actually happens — e.g. removing a
+parent explains that tasks/expenses/documents become general rather than
+being deleted, instead of leaving the user to guess.
+
+### Toast feedback (`NotificationContext` / `useNotify`)
+
+A single `Snackbar` mounted once in `NotificationProvider` (wraps the app
+in `main.tsx`, outside `AuthProvider`). `useNotify()` returns `notify(message, severity?)`
+— default severity `"success"`. Every create/update/delete calls `notify(...)`
+after the API call resolves, e.g. `notify("Task created.")`,
+`notify("Nice work — task marked done.")`. Keep messages short, active
+voice, and specific to what happened (not "Success!").
+
+### Empty states (`components/EmptyState.tsx`)
+
+Replaces bare "No X yet" text anywhere a list can be empty. Props: `icon`,
+`title`, `description`, optional `actionLabel` + `onAction` for a CTA
+button. Used both for "no family yet" (page-level, with a CTA back to
+`/family`) and "no parents/tasks/documents yet within this family"
+(section-level, pointing at the create form already on the page).
+
+### Family color + avatar (`utils/familyColor.ts`, `components/FamilyAvatar.tsx`)
+
+Each family gets a stable color from a 6-entry DESIGN.md-derived pastel
+palette, assigned by array index via `familyColorMap(families)`. Already
+used to tint `FamilySection` headers; `FamilyAvatar` renders a colored
+initial-letter `Avatar` using the same color so a family is recognizable
+by color across Dashboard, Family, Parents, Tasks, Expenses, and
+Documents without re-reading its name.
+
+### Responsive nav (`components/Layout.tsx`)
+
+Desktop (`md` and up): inline `Stack` of nav buttons in the app bar,
+bold when `location.pathname` matches. Mobile (below `md`): nav buttons
+hidden (`sx={{display:{xs:'none', md:'flex'}}}`), replaced by a hamburger
+`IconButton` that opens a temporary MUI `Drawer` with the same links as a
+`List`. One route list, two renderings — don't duplicate the link array.
+
+### Getting-started checklist (Dashboard)
+
+A family counts as "fresh" when `parents === 0 && openTasks === 0 &&
+documents === 0`. A fresh family's `FamilyDashboardBlock` renders a
+3-item checklist (Add a parent → `/parents`, Invite a sibling → `/family`,
+Create your first task → `/tasks`) instead of the usual stat tiles, each
+item a `RouterLink` with a `RadioButtonUnchecked` icon. Once any of those
+three signals is non-zero, the block switches permanently to the stat-tile
+view for that family. This is the direct answer to "users should know
+where and how to start" — the next action is a literal, clickable item on
+the page they land on, not something inferred from empty tabs.
+
+### Zero-state onboarding (Dashboard, no families)
+
+A user with no families at all sees a welcome hero on `/dashboard` with
+the create-family and join-family forms inlined directly (not a link to
+`/family`) — removes a navigation click for the single most important
+first action a new user takes. The same two forms also still live on
+`/family` for later use (inviting more families, etc.); the Dashboard
+copy is intentional duplication to shorten the very first flow, not a
+refactor target.
+
+### 404 page (`pages/NotFoundPage.tsx`)
+
+Simple "404 / That page doesn't exist." + a "Back to Dashboard" button,
+rendered inside the normal authenticated `Layout` (nav bar stays usable)
+via a catch-all `<Route path="*">` as the last route.

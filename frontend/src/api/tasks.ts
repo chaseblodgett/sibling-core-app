@@ -1,11 +1,13 @@
 import { apiClient } from "./client";
-import type { Task } from "../types";
+import type { RecurrenceRule, Task } from "../types";
 
 export interface CreateTaskPayload {
   title: string;
   description: string;
   assignee_id?: string;
   parent_id?: string;
+  due_date?: string;
+  recurrence_rule?: RecurrenceRule;
 }
 
 export interface UpdateTaskPayload {

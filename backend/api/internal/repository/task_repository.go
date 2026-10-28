@@ -39,13 +39,14 @@ func NewTaskRepository(db *pgxpool.Pool) TaskRepository {
 func (r *postgresTaskRepository) Create(ctx context.Context, task *models.Task) error {
 	query, args, err := dialect.Insert(tasksTable).
 		Rows(goqu.Record{
-			"family_id":   task.FamilyID,
-			"title":       task.Title,
-			"description": task.Description,
-			"assignee_id": task.AssigneeID,
-			"parent_id":   task.ParentID,
-			"created_by":  task.CreatedBy,
-			"due_date":    task.DueDate,
+			"family_id":       task.FamilyID,
+			"title":           task.Title,
+			"description":     task.Description,
+			"assignee_id":     task.AssigneeID,
+			"parent_id":       task.ParentID,
+			"created_by":      task.CreatedBy,
+			"due_date":        task.DueDate,
+			"recurrence_rule": task.RecurrenceRule,
 		}).
 		Returning("id", "status", "created_at", "updated_at").
 		Prepared(true).
@@ -95,13 +96,14 @@ func (r *postgresTaskRepository) ListByFamily(ctx context.Context, familyID stri
 func (r *postgresTaskRepository) Update(ctx context.Context, task *models.Task) error {
 	query, args, err := dialect.Update(tasksTable).
 		Set(goqu.Record{
-			"title":       task.Title,
-			"description": task.Description,
-			"status":      task.Status,
-			"assignee_id": task.AssigneeID,
-			"parent_id":   task.ParentID,
-			"due_date":    task.DueDate,
-			"updated_at":  goqu.L("now()"),
+			"title":           task.Title,
+			"description":     task.Description,
+			"status":          task.Status,
+			"assignee_id":     task.AssigneeID,
+			"parent_id":       task.ParentID,
+			"due_date":        task.DueDate,
+			"recurrence_rule": task.RecurrenceRule,
+			"updated_at":      goqu.L("now()"),
 		}).
 		Where(goqu.Ex{"id": task.ID}).
 		Returning("updated_at").
@@ -135,7 +137,7 @@ func (r *postgresTaskRepository) Delete(ctx context.Context, id string) error {
 
 func taskSelectDataset() *goqu.SelectDataset {
 	return dialect.From(tasksTable).
-		Select("id", "family_id", "title", "description", "status", "assignee_id", "parent_id", "created_by", "due_date", "created_at", "updated_at")
+		Select("id", "family_id", "title", "description", "status", "assignee_id", "parent_id", "created_by", "due_date", "recurrence_rule", "created_at", "updated_at")
 }
 
 type taskScanner interface {
@@ -143,7 +145,7 @@ type taskScanner interface {
 }
 
 func scanTaskRow(row taskScanner, t *models.Task) error {
-	return row.Scan(&t.ID, &t.FamilyID, &t.Title, &t.Description, &t.Status, &t.AssigneeID, &t.ParentID, &t.CreatedBy, &t.DueDate, &t.CreatedAt, &t.UpdatedAt)
+	return row.Scan(&t.ID, &t.FamilyID, &t.Title, &t.Description, &t.Status, &t.AssigneeID, &t.ParentID, &t.CreatedBy, &t.DueDate, &t.RecurrenceRule, &t.CreatedAt, &t.UpdatedAt)
 }
 
 func scanTask(row pgx.Row) (*models.Task, error) {

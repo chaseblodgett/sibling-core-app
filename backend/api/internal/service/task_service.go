@@ -4,12 +4,32 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 )
 
 var validTaskStatuses = map[string]bool{"todo": true, "in_progress": true, "done": true}
+
+var validRecurrenceRules = map[string]bool{"none": true, "daily": true, "weekly": true, "monthly": true}
+
+// nextDueDate advances due by one cycle of rule. Callers only invoke this
+// for non-"none" rules, so the default case (returning due unchanged)
+// never actually triggers in practice — it exists so the function is
+// total rather than panicking on an unexpected value.
+func nextDueDate(due time.Time, rule string) time.Time {
+	switch rule {
+	case "daily":
+		return due.AddDate(0, 0, 1)
+	case "weekly":
+		return due.AddDate(0, 0, 7)
+	case "monthly":
+		return due.AddDate(0, 1, 0)
+	default:
+		return due
+	}
+}
 
 // TaskService contains business logic for the shared family task board.
 type TaskService interface {
@@ -50,13 +70,22 @@ func (s *taskService) CreateTask(ctx context.Context, input models.CreateTaskInp
 		}
 	}
 
+	recurrenceRule := input.RecurrenceRule
+	if recurrenceRule == "" {
+		recurrenceRule = "none"
+	} else if !validRecurrenceRules[recurrenceRule] {
+		return nil, fmt.Errorf("%w: recurrence_rule must be none, daily, weekly, or monthly", ErrInvalidInput)
+	}
+
 	task := &models.Task{
-		FamilyID:    input.FamilyID,
-		Title:       title,
-		Description: input.Description,
-		AssigneeID:  input.AssigneeID,
-		ParentID:    input.ParentID,
-		CreatedBy:   input.CreatedBy,
+		FamilyID:       input.FamilyID,
+		Title:          title,
+		Description:    input.Description,
+		AssigneeID:     input.AssigneeID,
+		ParentID:       input.ParentID,
+		CreatedBy:      input.CreatedBy,
+		DueDate:        input.DueDate,
+		RecurrenceRule: recurrenceRule,
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		return nil, err
@@ -77,6 +106,7 @@ func (s *taskService) UpdateTask(ctx context.Context, id string, input models.Up
 	if err != nil {
 		return nil, err
 	}
+	wasDone := task.Status == "done"
 
 	if input.Title != nil {
 		title := strings.TrimSpace(*input.Title)
@@ -106,10 +136,42 @@ func (s *taskService) UpdateTask(ctx context.Context, id string, input models.Up
 		}
 		task.ParentID = input.ParentID
 	}
+	if input.DueDate != nil {
+		task.DueDate = input.DueDate
+	}
+	if input.RecurrenceRule != nil {
+		if !validRecurrenceRules[*input.RecurrenceRule] {
+			return nil, fmt.Errorf("%w: recurrence_rule must be none, daily, weekly, or monthly", ErrInvalidInput)
+		}
+		task.RecurrenceRule = *input.RecurrenceRule
+	}
 
 	if err := s.taskRepo.Update(ctx, task); err != nil {
 		return nil, err
 	}
+
+	// Completing a recurring task spawns its next occurrence rather than
+	// just closing it out — that's the whole point of marking a task
+	// recurring. Only on a true not-done -> done transition, so replaying
+	// the same PATCH (or editing an already-done task) doesn't spawn
+	// duplicates.
+	if !wasDone && task.Status == "done" && task.RecurrenceRule != "none" && task.DueDate != nil {
+		nextDue := nextDueDate(*task.DueDate, task.RecurrenceRule)
+		next := &models.Task{
+			FamilyID:       task.FamilyID,
+			Title:          task.Title,
+			Description:    task.Description,
+			AssigneeID:     task.AssigneeID,
+			ParentID:       task.ParentID,
+			CreatedBy:      task.CreatedBy,
+			DueDate:        &nextDue,
+			RecurrenceRule: task.RecurrenceRule,
+		}
+		if err := s.taskRepo.Create(ctx, next); err != nil {
+			return nil, err
+		}
+	}
+
 	return task, nil
 }
 

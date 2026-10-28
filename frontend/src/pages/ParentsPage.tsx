@@ -1,4 +1,5 @@
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import {
   Alert,
   Box,
@@ -18,17 +19,26 @@ import {
   Typography,
 } from "@mui/material";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { familyApi } from "../api/family";
 import { parentsApi } from "../api/parents";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { EmptyState } from "../components/EmptyState";
+import { FamilySection } from "../components/FamilySection";
 import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
-import type { Member, Parent } from "../types";
+import { useNotify } from "../context/NotificationContext";
+import { useConfirm } from "../hooks/useConfirm";
+import { familyColorMap } from "../utils/familyColor";
+import type { Family, Member, Parent } from "../types";
 
 export function ParentsPage() {
   const { user } = useAuth();
-  const { families, loading: familiesLoading, selectedFamilyId } = useFamilies();
+  const { families, loading: familiesLoading } = useFamilies();
+  const notify = useNotify();
+  const navigate = useNavigate();
+  const { state: confirmState, confirm, close: closeConfirm, handleConfirm } = useConfirm();
 
   const [parents, setParents] = useState<Parent[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -40,10 +50,7 @@ export function ParentsPage() {
   const [createFamilyId, setCreateFamilyId] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const viewingAllFamilies = selectedFamilyId === null;
-  const familiesToLoad = viewingAllFamilies ? families : families.filter((f) => f.id === selectedFamilyId);
-
-  const load = useCallback(async (targets: typeof families) => {
+  const load = useCallback(async (targets: Family[]) => {
     if (targets.length === 0) {
       setParents([]);
       setMembers([]);
@@ -68,14 +75,14 @@ export function ParentsPage() {
 
   useEffect(() => {
     if (!familiesLoading) {
-      load(familiesToLoad);
+      load(families);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familiesLoading, selectedFamilyId, families]);
+  }, [familiesLoading, families]);
 
   useEffect(() => {
-    setCreateFamilyId(selectedFamilyId ?? families[0]?.id ?? "");
-  }, [selectedFamilyId, families]);
+    setCreateFamilyId((prev) => prev || families[0]?.id || "");
+  }, [families]);
 
   const isOwnerOf = useCallback(
     (familyId: string) => members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "owner"),
@@ -89,9 +96,10 @@ export function ParentsPage() {
     setSubmitting(true);
     try {
       await parentsApi.create(createFamilyId, { name, relation });
+      notify(`${name} added.`);
       setName("");
       setRelation("");
-      await load(familiesToLoad);
+      await load(families);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't add that parent.");
     } finally {
@@ -99,18 +107,25 @@ export function ParentsPage() {
     }
   }
 
+  function confirmDelete(parent: Parent) {
+    confirm({
+      title: "Remove parent?",
+      message: `Remove ${parent.name}? Tasks, expenses, and documents tied to them will become general (not deleted).`,
+      confirmLabel: "Remove",
+      destructive: true,
+      onConfirm: () => handleDelete(parent.id),
+    });
+  }
+
   async function handleDelete(parentId: string) {
     setError(null);
     try {
       await parentsApi.delete(parentId);
       setParents((prev) => prev.filter((p) => p.id !== parentId));
+      notify("Parent removed.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't remove that parent.");
     }
-  }
-
-  function familyName(id: string) {
-    return families.find((f) => f.id === id)?.name;
   }
 
   if (familiesLoading || loading) {
@@ -123,12 +138,17 @@ export function ParentsPage() {
 
   if (families.length === 0) {
     return (
-      <Alert severity="info">
-        You need a family first — <Link component={RouterLink} to="/family">create or join one</Link> to start
-        tracking parents.
-      </Alert>
+      <EmptyState
+        icon={<PersonAddAlt1Icon />}
+        title="No family yet"
+        description="Create or join a family first, then come back here to start tracking parents."
+        actionLabel="Go to Family"
+        onAction={() => navigate("/family")}
+      />
     );
   }
+
+  const colors = familyColorMap(families);
 
   return (
     <>
@@ -148,7 +168,7 @@ export function ParentsPage() {
       <Stack spacing={2}>
         <Paper sx={{ p: 3 }}>
           <Stack direction="row" spacing={2} component="form" onSubmit={handleCreate} sx={{ flexWrap: "wrap" }}>
-            {viewingAllFamilies && families.length > 1 && (
+            {families.length > 1 && (
               <Select size="small" value={createFamilyId} onChange={(e) => setCreateFamilyId(e.target.value)}>
                 {families.map((f) => (
                   <MenuItem key={f.id} value={f.id}>
@@ -171,45 +191,62 @@ export function ParentsPage() {
           </Stack>
         </Paper>
 
-        <Paper>
-          <List>
-            {parents.length === 0 && (
-              <ListItem>
-                <ListItemText primary="No parents yet" secondary="Add one above to start tracking tasks for them." />
-              </ListItem>
-            )}
-            {parents.map((parent) => (
-              <ListItem
-                key={parent.id}
-                secondaryAction={
-                  isOwnerOf(parent.family_id) && (
-                    <IconButton edge="end" aria-label="Remove parent" onClick={() => handleDelete(parent.id)}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  )
-                }
-              >
-                <ListItemText
-                  primary={
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                      <span>{parent.name}</span>
-                      {parent.relation && <Chip label={parent.relation} size="small" />}
-                      {viewingAllFamilies && (
-                        <Chip label={familyName(parent.family_id)} size="small" color="primary" variant="outlined" />
-                      )}
-                    </Stack>
-                  }
-                  secondary={
-                    <Link component={RouterLink} to={`/tasks?parent_id=${parent.id}&family_id=${parent.family_id}`}>
-                      View tasks
-                    </Link>
-                  }
+        {families.map((family) => {
+          const familyParents = parents.filter((p) => p.family_id === family.id);
+          return (
+            <FamilySection key={family.id} family={family} color={colors.get(family.id)!}>
+              {familyParents.length === 0 ? (
+                <EmptyState
+                  icon={<PersonAddAlt1Icon />}
+                  title="No parents yet"
+                  description="Add the person this family is coordinating care for, using the form above."
                 />
-              </ListItem>
-            ))}
-          </List>
-        </Paper>
+              ) : (
+                <List>
+                  {familyParents.map((parent) => (
+                    <ListItem
+                      key={parent.id}
+                      secondaryAction={
+                        isOwnerOf(parent.family_id) && (
+                          <IconButton edge="end" aria-label="Remove parent" onClick={() => confirmDelete(parent)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        )
+                      }
+                    >
+                      <ListItemText
+                        primary={
+                          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                            <span>{parent.name}</span>
+                            {parent.relation && <Chip label={parent.relation} size="small" />}
+                          </Stack>
+                        }
+                        secondary={
+                          <Link component={RouterLink} to={`/tasks?parent_id=${parent.id}`}>
+                            View tasks
+                          </Link>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </FamilySection>
+          );
+        })}
       </Stack>
+
+      {confirmState && (
+        <ConfirmDialog
+          open
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          destructive={confirmState.destructive}
+          onConfirm={handleConfirm}
+          onCancel={closeConfirm}
+        />
+      )}
     </>
   );
 }

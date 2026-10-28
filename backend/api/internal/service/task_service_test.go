@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,28 @@ func TestCreateTaskSuccess(t *testing.T) {
 	require.NotNil(t, created)
 	assert.Equal(t, "Refill prescriptions", task.Title)
 	assert.Equal(t, "todo", task.Status)
+}
+
+func TestCreateTaskWithDueDate(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	var created *models.Task
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		created = task
+		return nil
+	}
+
+	dueDate := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	_, err := svc.CreateTask(context.Background(), models.CreateTaskInput{
+		FamilyID:  "family-1",
+		Title:     "Refill prescriptions",
+		CreatedBy: "user-1",
+		DueDate:   &dueDate,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, created.DueDate)
+	assert.True(t, dueDate.Equal(*created.DueDate))
 }
 
 func TestCreateTaskBlankTitle(t *testing.T) {
@@ -143,6 +166,146 @@ func TestUpdateTaskPartial(t *testing.T) {
 	require.NotNil(t, updated)
 	assert.Equal(t, "Doctor visit", task.Title, "title should be unchanged when not provided")
 	assert.Equal(t, "done", task.Status)
+}
+
+func TestUpdateTaskDueDate(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit", Status: "todo"}, nil
+	}
+	var updated *models.Task
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error {
+		updated = task
+		return nil
+	}
+
+	dueDate := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	task, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{DueDate: &dueDate})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.NotNil(t, task.DueDate)
+	assert.True(t, dueDate.Equal(*task.DueDate))
+}
+
+func TestCreateTaskDefaultsRecurrenceRuleToNone(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	var created *models.Task
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		created = task
+		return nil
+	}
+
+	_, err := svc.CreateTask(context.Background(), models.CreateTaskInput{FamilyID: "family-1", Title: "Doctor visit"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "none", created.RecurrenceRule)
+}
+
+func TestCreateTaskRejectsInvalidRecurrenceRule(t *testing.T) {
+	svc, _, _, _ := newTestTaskService(t)
+
+	_, err := svc.CreateTask(context.Background(), models.CreateTaskInput{
+		FamilyID:       "family-1",
+		Title:          "Doctor visit",
+		RecurrenceRule: "fortnightly",
+	})
+
+	assert.ErrorIs(t, err, service.ErrInvalidInput)
+}
+
+func TestUpdateTaskCompletingRecurringTaskSpawnsNextOccurrence(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	dueDate := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{
+			ID: id, FamilyID: "family-1", Title: "Refill prescription", Status: "todo",
+			RecurrenceRule: "weekly", DueDate: &dueDate,
+		}, nil
+	}
+	var updated *models.Task
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error {
+		updated = task
+		return nil
+	}
+	var created *models.Task
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		created = task
+		return nil
+	}
+
+	done := "done"
+	task, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{Status: &done})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, "done", task.Status, "the completed task itself is marked done, not replaced")
+
+	require.NotNil(t, created, "a next occurrence should have been created")
+	assert.Equal(t, "Refill prescription", created.Title)
+	assert.Equal(t, "weekly", created.RecurrenceRule)
+	require.NotNil(t, created.DueDate)
+	assert.True(t, dueDate.AddDate(0, 0, 7).Equal(*created.DueDate))
+}
+
+func TestUpdateTaskCompletingNonRecurringTaskDoesNotSpawnNextOccurrence(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "One-off errand", Status: "todo", RecurrenceRule: "none"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	created := false
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		created = true
+		return nil
+	}
+
+	done := "done"
+	_, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{Status: &done})
+
+	require.NoError(t, err)
+	assert.False(t, created)
+}
+
+func TestUpdateTaskRecompletingAlreadyDoneTaskDoesNotSpawnDuplicate(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	dueDate := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{
+			ID: id, FamilyID: "family-1", Title: "Refill prescription", Status: "done",
+			RecurrenceRule: "weekly", DueDate: &dueDate,
+		}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	created := false
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		created = true
+		return nil
+	}
+
+	done := "done"
+	_, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{Status: &done})
+
+	require.NoError(t, err)
+	assert.False(t, created, "already-done -> done should not re-spawn a next occurrence")
+}
+
+func TestUpdateTaskRejectsInvalidRecurrenceRule(t *testing.T) {
+	svc, taskRepo, _, _ := newTestTaskService(t)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit", Status: "todo"}, nil
+	}
+
+	bad := "fortnightly"
+	_, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{RecurrenceRule: &bad})
+
+	assert.ErrorIs(t, err, service.ErrInvalidInput)
 }
 
 func TestAssignTaskRejectsMemberFromAnotherFamily(t *testing.T) {

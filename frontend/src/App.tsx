@@ -6,6 +6,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
 import { FamilyPage } from "./pages/FamilyPage";
 import { LoginPage } from "./pages/LoginPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { ParentsPage } from "./pages/ParentsPage";
 import { SignupPage } from "./pages/SignupPage";
 import { TasksPage } from "./pages/TasksPage";
@@ -23,6 +24,7 @@ function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
     </Routes>

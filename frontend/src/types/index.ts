@@ -41,6 +41,7 @@ export interface Parent {
 }
 
 export type TaskStatus = "todo" | "in_progress" | "done";
+export type RecurrenceRule = "none" | "daily" | "weekly" | "monthly";
 
 export interface Task {
   id: string;
@@ -52,6 +53,7 @@ export interface Task {
   parent_id?: string;
   created_by: string;
   due_date?: string;
+  recurrence_rule: RecurrenceRule;
   created_at: string;
   updated_at: string;
 }

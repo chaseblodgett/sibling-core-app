@@ -1,4 +1,5 @@
 import AddIcon from "@mui/icons-material/Add";
+import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
@@ -9,8 +10,8 @@ import {
   Chip,
   CircularProgress,
   Collapse,
+  Divider,
   FormControlLabel,
-  Grid,
   IconButton,
   List,
   ListItem,
@@ -27,9 +28,15 @@ import { ApiError } from "../api/client";
 import { expensesApi } from "../api/expenses";
 import { familyApi } from "../api/family";
 import { parentsApi } from "../api/parents";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { EmptyState } from "../components/EmptyState";
+import { FamilySection } from "../components/FamilySection";
 import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
-import type { Expense, ExpenseSplit, Member, Parent } from "../types";
+import { useNotify } from "../context/NotificationContext";
+import { useConfirm } from "../hooks/useConfirm";
+import { familyColorMap } from "../utils/familyColor";
+import type { Balance, Expense, ExpenseSplit, Family, Member, Parent } from "../types";
 
 function formatCents(cents: number, currency = "USD") {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency });
@@ -37,12 +44,14 @@ function formatCents(cents: number, currency = "USD") {
 
 export function ExpensesPage() {
   const { user } = useAuth();
-  const { families, loading: familiesLoading, selectedFamilyId } = useFamilies();
+  const { families, loading: familiesLoading } = useFamilies();
+  const notify = useNotify();
+  const { state: confirmState, confirm, close: closeConfirm, handleConfirm } = useConfirm();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [parents, setParents] = useState<Parent[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [balancesByFamily, setBalancesByFamily] = useState<Record<string, Balance[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,36 +64,28 @@ export function ExpensesPage() {
   const [splitMemberIds, setSplitMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const viewingAllFamilies = selectedFamilyId === null;
-  const familiesToLoad = viewingAllFamilies ? families : families.filter((f) => f.id === selectedFamilyId);
-
-  const load = useCallback(async (targets: typeof families, allMode: boolean) => {
+  const load = useCallback(async (targets: Family[]) => {
     if (targets.length === 0) {
       setExpenses([]);
       setParents([]);
       setMembers([]);
-      setBalances({});
+      setBalancesByFamily({});
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const [expenseLists, parentLists, memberLists] = await Promise.all([
+      const [expenseLists, parentLists, memberLists, balanceLists] = await Promise.all([
         Promise.all(targets.map((f) => expensesApi.list(f.id))),
         Promise.all(targets.map((f) => parentsApi.list(f.id))),
         Promise.all(targets.map((f) => familyApi.listMembers(f.id))),
+        Promise.all(targets.map((f) => expensesApi.balances(f.id))),
       ]);
       setExpenses(expenseLists.flat());
       setParents(parentLists.flat());
       setMembers(memberLists.flat());
-
-      if (!allMode && targets.length === 1) {
-        const balanceList = await expensesApi.balances(targets[0].id);
-        setBalances(Object.fromEntries(balanceList.map((b) => [b.member_id, b.net_cents])));
-      } else {
-        setBalances({});
-      }
+      setBalancesByFamily(Object.fromEntries(targets.map((f, i) => [f.id, balanceLists[i]])));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't load expenses.");
     } finally {
@@ -94,14 +95,14 @@ export function ExpensesPage() {
 
   useEffect(() => {
     if (!familiesLoading) {
-      load(familiesToLoad, viewingAllFamilies);
+      load(families);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familiesLoading, selectedFamilyId, families]);
+  }, [familiesLoading, families]);
 
   useEffect(() => {
-    setCreateFamilyId(selectedFamilyId ?? families[0]?.id ?? "");
-  }, [selectedFamilyId, families]);
+    setCreateFamilyId((prev) => prev || families[0]?.id || "");
+  }, [families]);
 
   const createFamilyParents = parents.filter((p) => p.family_id === createFamilyId);
   const createFamilyMembers = members.filter((m) => m.family_id === createFamilyId);
@@ -109,9 +110,14 @@ export function ExpensesPage() {
   useEffect(() => {
     // Default: split evenly among everyone in the chosen family, and pay
     // as yourself — the common case for logging your own expense.
-    setSplitMemberIds(createFamilyMembers.map((m) => m.id));
-    setPaidBy(createFamilyMembers.find((m) => m.user_id === user?.id)?.id ?? "");
-  }, [createFamilyId, createFamilyMembers, user?.id]);
+    // Depend on `members` (stable until actually reloaded) and filter
+    // inside the effect — depending on `createFamilyMembers` directly
+    // would re-run every render, since .filter() returns a new array
+    // reference each time, causing an infinite render loop.
+    const nextMembers = members.filter((m) => m.family_id === createFamilyId);
+    setSplitMemberIds(nextMembers.map((m) => m.id));
+    setPaidBy(nextMembers.find((m) => m.user_id === user?.id)?.id ?? "");
+  }, [createFamilyId, members, user?.id]);
 
   function toggleSplitMember(memberId: string) {
     setSplitMemberIds((prev) => (prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]));
@@ -154,7 +160,8 @@ export function ExpensesPage() {
       setAmountDollars("");
       setCategory("");
       setParentId("");
-      await load(familiesToLoad, viewingAllFamilies);
+      notify("Expense logged.");
+      await load(families);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't log that expense.");
     } finally {
@@ -162,19 +169,27 @@ export function ExpensesPage() {
     }
   }
 
+  function confirmDelete(expense: Expense) {
+    confirm({
+      title: "Delete expense?",
+      message: `Delete "${expense.description}"? Any splits on it go with it. This can't be undone.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => handleDelete(expense.id),
+    });
+  }
+
   async function handleDelete(expenseId: string) {
     setError(null);
     try {
       await expensesApi.delete(expenseId);
       setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+      notify("Expense deleted.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't delete that expense.");
     }
   }
 
-  function familyName(id: string) {
-    return families.find((f) => f.id === id)?.name;
-  }
   function parentName(id?: string) {
     return parents.find((p) => p.id === id)?.name;
   }
@@ -192,10 +207,16 @@ export function ExpensesPage() {
   }
 
   if (families.length === 0) {
-    return <Alert severity="info">You need a family first to track expenses.</Alert>;
+    return (
+      <EmptyState
+        icon={<AttachMoneyIcon />}
+        title="No family yet"
+        description="Create or join a family first, then come back here to start tracking expenses."
+      />
+    );
   }
 
-  const hasBalances = Object.keys(balances).length > 0;
+  const colors = familyColorMap(families);
 
   return (
     <>
@@ -209,174 +230,176 @@ export function ExpensesPage() {
         </Alert>
       )}
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 8 }}>
-          <Stack spacing={2}>
-            <Paper sx={{ p: 3 }}>
-              <Stack spacing={2} component="form" onSubmit={handleCreate}>
-                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-                  <TextField
-                    label="Description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    required
-                    size="small"
-                    sx={{ flex: 1, minWidth: 180 }}
-                  />
-                  <TextField
-                    label="Amount"
-                    type="number"
-                    slotProps={{ htmlInput: { step: "0.01", min: "0" } }}
-                    value={amountDollars}
-                    onChange={(e) => setAmountDollars(e.target.value)}
-                    required
-                    size="small"
-                    sx={{ width: 140 }}
-                  />
-                  <TextField
-                    label="Category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    size="small"
-                    sx={{ width: 160 }}
-                  />
-                </Stack>
-                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", alignItems: "center" }}>
-                  {viewingAllFamilies && families.length > 1 && (
-                    <Select size="small" value={createFamilyId} onChange={(e) => setCreateFamilyId(e.target.value)}>
-                      {families.map((f) => (
-                        <MenuItem key={f.id} value={f.id}>
-                          {f.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  )}
-                  <Select
-                    size="small"
-                    value={parentId}
-                    onChange={(e) => setParentId(e.target.value)}
-                    displayEmpty
-                    sx={{ minWidth: 160 }}
-                  >
-                    <MenuItem value="">No parent (general)</MenuItem>
-                    {createFamilyParents.map((p) => (
-                      <MenuItem key={p.id} value={p.id}>
-                        {p.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <Select size="small" value={paidBy} onChange={(e) => setPaidBy(e.target.value)} sx={{ minWidth: 160 }}>
-                    <MenuItem value="" disabled>
-                      Paid by…
+      <Stack spacing={2}>
+        <Paper sx={{ p: 3 }}>
+          <Stack spacing={2} component="form" onSubmit={handleCreate}>
+            <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+              <TextField
+                label="Description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                required
+                size="small"
+                sx={{ flex: 1, minWidth: 180 }}
+              />
+              <TextField
+                label="Amount"
+                type="number"
+                slotProps={{ htmlInput: { step: "0.01", min: "0" } }}
+                value={amountDollars}
+                onChange={(e) => setAmountDollars(e.target.value)}
+                required
+                size="small"
+                sx={{ width: 140 }}
+              />
+              <TextField
+                label="Category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                size="small"
+                sx={{ width: 160 }}
+              />
+            </Stack>
+            <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", alignItems: "center" }}>
+              {families.length > 1 && (
+                <Select size="small" value={createFamilyId} onChange={(e) => setCreateFamilyId(e.target.value)}>
+                  {families.map((f) => (
+                    <MenuItem key={f.id} value={f.id}>
+                      {f.name}
                     </MenuItem>
-                    {createFamilyMembers.map((m) => (
-                      <MenuItem key={m.id} value={m.id}>
-                        {m.full_name || m.email}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </Stack>
-                <Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                    Split evenly between:
-                  </Typography>
-                  <Stack direction="row" sx={{ flexWrap: "wrap" }}>
-                    {createFamilyMembers.map((m) => (
-                      <FormControlLabel
-                        key={m.id}
-                        control={
-                          <Checkbox
-                            size="small"
-                            checked={splitMemberIds.includes(m.id)}
-                            onChange={() => toggleSplitMember(m.id)}
-                          />
-                        }
-                        label={m.full_name || m.email}
+                  ))}
+                </Select>
+              )}
+              <Select
+                size="small"
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                displayEmpty
+                sx={{ minWidth: 160 }}
+              >
+                <MenuItem value="">No parent (general)</MenuItem>
+                {createFamilyParents.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.name}
+                  </MenuItem>
+                ))}
+              </Select>
+              <Select size="small" value={paidBy} onChange={(e) => setPaidBy(e.target.value)} sx={{ minWidth: 160 }}>
+                <MenuItem value="" disabled>
+                  Paid by…
+                </MenuItem>
+                {createFamilyMembers.map((m) => (
+                  <MenuItem key={m.id} value={m.id}>
+                    {m.full_name || m.email}
+                  </MenuItem>
+                ))}
+              </Select>
+            </Stack>
+            <Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                Split evenly between:
+              </Typography>
+              <Stack direction="row" sx={{ flexWrap: "wrap" }}>
+                {createFamilyMembers.map((m) => (
+                  <FormControlLabel
+                    key={m.id}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={splitMemberIds.includes(m.id)}
+                        onChange={() => toggleSplitMember(m.id)}
                       />
-                    ))}
-                  </Stack>
-                </Box>
-                <Box>
-                  <Button type="submit" variant="contained" startIcon={<AddIcon />} disabled={submitting}>
-                    Log expense
-                  </Button>
-                </Box>
-              </Stack>
-            </Paper>
-
-            <Paper>
-              <List>
-                {expenses.length === 0 && (
-                  <ListItem>
-                    <ListItemText primary="No expenses yet" secondary="Logged expenses and their splits will show up here." />
-                  </ListItem>
-                )}
-                {expenses.map((expense) => (
-                  <ExpenseRow
-                    key={expense.id}
-                    expense={expense}
-                    familyLabel={viewingAllFamilies ? familyName(expense.family_id) : undefined}
-                    parentLabel={parentName(expense.parent_id)}
-                    paidByLabel={memberName(expense.paid_by)}
-                    memberName={memberName}
-                    onDelete={() => handleDelete(expense.id)}
+                    }
+                    label={m.full_name || m.email}
                   />
                 ))}
-              </List>
-            </Paper>
+              </Stack>
+            </Box>
+            <Box>
+              <Button type="submit" variant="contained" startIcon={<AddIcon />} disabled={submitting}>
+                Log expense
+              </Button>
+            </Box>
           </Stack>
-        </Grid>
+        </Paper>
 
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" component="h2" gutterBottom>
-              Balances
-            </Typography>
-            {viewingAllFamilies ? (
-              <Typography variant="body2" color="text.secondary">
-                Pick a specific family above to see its balances.
-              </Typography>
-            ) : !hasBalances ? (
-              <Typography variant="body2" color="text.secondary">
-                All settled up.
-              </Typography>
-            ) : (
-              <List dense>
-                {Object.entries(balances).map(([memberId, net]) => (
-                  <ListItem key={memberId} disableGutters>
-                    <ListItemText
-                      primary={memberName(memberId)}
-                      secondary={net > 0 ? "is owed" : "owes"}
+        {families.map((family) => {
+          const familyExpenses = expenses.filter((e) => e.family_id === family.id);
+          const familyBalances = balancesByFamily[family.id] ?? [];
+          return (
+            <FamilySection key={family.id} family={family} color={colors.get(family.id)!}>
+              {familyBalances.length > 0 && (
+                <>
+                  <List dense sx={{ px: 1 }}>
+                    {familyBalances.map((b) => (
+                      <ListItem key={b.member_id} disableGutters sx={{ px: 2 }}>
+                        <ListItemText primary={memberName(b.member_id)} secondary={b.net_cents > 0 ? "is owed" : "owes"} />
+                        <Typography
+                          variant="body2"
+                          sx={{ color: b.net_cents > 0 ? "success.main" : "error.main", fontWeight: 600 }}
+                        >
+                          {formatCents(Math.abs(b.net_cents))}
+                        </Typography>
+                      </ListItem>
+                    ))}
+                  </List>
+                  <Divider />
+                </>
+              )}
+              {familyExpenses.length === 0 ? (
+                <EmptyState
+                  icon={<AttachMoneyIcon />}
+                  title="No expenses yet"
+                  description="Logged expenses and their splits will show up here — add one using the form above."
+                />
+              ) : (
+                <List>
+                  {familyExpenses.map((expense) => (
+                    <ExpenseRow
+                      key={expense.id}
+                      expense={expense}
+                      parentLabel={parentName(expense.parent_id)}
+                      paidByLabel={memberName(expense.paid_by)}
+                      memberName={memberName}
+                      onDelete={() => confirmDelete(expense)}
                     />
-                    <Typography variant="body2" sx={{ color: net > 0 ? "success.main" : "error.main", fontWeight: 600 }}>
-                      {formatCents(Math.abs(net))}
-                    </Typography>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </Paper>
-        </Grid>
-      </Grid>
+                  ))}
+                </List>
+              )}
+            </FamilySection>
+          );
+        })}
+      </Stack>
+
+      {confirmState && (
+        <ConfirmDialog
+          open
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          destructive={confirmState.destructive}
+          onConfirm={handleConfirm}
+          onCancel={closeConfirm}
+        />
+      )}
     </>
   );
 }
 
 function ExpenseRow({
   expense,
-  familyLabel,
   parentLabel,
   paidByLabel,
   memberName,
   onDelete,
 }: {
   expense: Expense;
-  familyLabel?: string;
   parentLabel?: string;
   paidByLabel?: string;
   memberName: (id?: string) => string | undefined;
   onDelete: () => void;
 }) {
+  const notify = useNotify();
   const [expanded, setExpanded] = useState(false);
   const [splits, setSplits] = useState<ExpenseSplit[]>([]);
   const [splitsLoaded, setSplitsLoaded] = useState(false);
@@ -396,6 +419,7 @@ function ExpenseRow({
   async function handleSettle(splitId: string) {
     const updated = await expensesApi.settleSplit(splitId);
     setSplits((prev) => prev.map((s) => (s.id === splitId ? updated : s)));
+    notify("Marked settled.");
   }
 
   return (
@@ -421,7 +445,6 @@ function ExpenseRow({
               <span>{expense.description}</span>
               <Chip label={formatCents(expense.amount_cents, expense.currency)} size="small" color="primary" />
               {expense.category && <Chip label={expense.category} size="small" variant="outlined" />}
-              {familyLabel && <Chip label={familyLabel} size="small" color="primary" variant="outlined" />}
               {parentLabel && <Chip label={parentLabel} size="small" />}
             </Stack>
           }

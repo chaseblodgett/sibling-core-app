@@ -1,7 +1,22 @@
-import { AppBar, Box, Button, Container, MenuItem, Select, Stack, Toolbar, Typography } from "@mui/material";
-import { Link as RouterLink, Outlet, useNavigate } from "react-router-dom";
+import MenuIcon from "@mui/icons-material/Menu";
+import {
+  AppBar,
+  Box,
+  Button,
+  Container,
+  Divider,
+  Drawer,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemText,
+  Stack,
+  Toolbar,
+  Typography,
+} from "@mui/material";
+import { useState } from "react";
+import { Link as RouterLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useFamilies } from "../context/FamilyContext";
 
 const navItems = [
   { label: "Dashboard", to: "/" },
@@ -14,8 +29,9 @@ const navItems = [
 
 export function Layout() {
   const { logout } = useAuth();
-  const { families, selectedFamilyId, setSelectedFamilyId } = useFamilies();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   function handleLogout() {
     logout();
@@ -26,6 +42,15 @@ export function Layout() {
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar>
+          <IconButton
+            edge="start"
+            color="inherit"
+            aria-label="Open navigation"
+            onClick={() => setDrawerOpen(true)}
+            sx={{ display: { xs: "inline-flex", md: "none" }, mr: 1 }}
+          >
+            <MenuIcon />
+          </IconButton>
           <Typography
             variant="h6"
             component={RouterLink}
@@ -34,9 +59,15 @@ export function Layout() {
           >
             Caretree
           </Typography>
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center", display: { xs: "none", md: "flex" } }}>
             {navItems.map((item) => (
-              <Button key={item.to} color="inherit" component={RouterLink} to={item.to}>
+              <Button
+                key={item.to}
+                color="inherit"
+                component={RouterLink}
+                to={item.to}
+                sx={{ fontWeight: location.pathname === item.to ? 700 : 500 }}
+              >
                 {item.label}
               </Button>
             ))}
@@ -44,34 +75,39 @@ export function Layout() {
               Log out
             </Button>
           </Stack>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleLogout}
+            sx={{ display: { xs: "inline-flex", md: "none" } }}
+          >
+            Log out
+          </Button>
         </Toolbar>
-        {families.length > 0 && (
-          <Toolbar variant="dense" sx={{ borderTop: "1px solid", borderColor: "divider", minHeight: 44 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mr: 1.5 }}>
-              Viewing:
-            </Typography>
-            {families.length === 1 ? (
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                {families[0].name}
-              </Typography>
-            ) : (
-              <Select
-                size="small"
-                value={selectedFamilyId ?? ""}
-                onChange={(e) => setSelectedFamilyId(e.target.value || null)}
-                sx={{ minWidth: 200 }}
-              >
-                <MenuItem value="">All families</MenuItem>
-                {families.map((f) => (
-                  <MenuItem key={f.id} value={f.id}>
-                    {f.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            )}
-          </Toolbar>
-        )}
       </AppBar>
+
+      <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <Box sx={{ width: 240 }} role="presentation">
+          <Typography variant="h6" sx={{ fontWeight: 700, px: 2, py: 2 }}>
+            Caretree
+          </Typography>
+          <Divider />
+          <List>
+            {navItems.map((item) => (
+              <ListItemButton
+                key={item.to}
+                component={RouterLink}
+                to={item.to}
+                selected={location.pathname === item.to}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <ListItemText primary={item.label} />
+              </ListItemButton>
+            ))}
+          </List>
+        </Box>
+      </Drawer>
+
       <Container component="main" sx={{ flexGrow: 1, py: 4 }}>
         <Outlet />
       </Container>
