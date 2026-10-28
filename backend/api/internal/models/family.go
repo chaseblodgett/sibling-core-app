@@ -38,6 +38,12 @@ type InviteMemberRequest struct {
 	Email string `json:"email"`
 }
 
+// UpdateMemberRoleRequest is the JSON body for
+// PATCH /families/:id/members/:memberId/role.
+type UpdateMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
 // CreateFamilyInput carries the fields needed to create a new family.
 type CreateFamilyInput struct {
 	Name      string

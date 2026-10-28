@@ -9,12 +9,16 @@ import (
 // Handlers bundles every resource handler so routes can be registered in
 // one place from the DI container.
 type Handlers struct {
-	Auth     *AuthHandler
-	Family   *FamilyHandler
-	Parent   *ParentHandler
-	Task     *TaskHandler
-	Expense  *ExpenseHandler
-	Document *DocumentHandler
+	Auth                    *AuthHandler
+	Family                  *FamilyHandler
+	Parent                  *ParentHandler
+	Task                    *TaskHandler
+	Expense                 *ExpenseHandler
+	Document                *DocumentHandler
+	Activity                *ActivityHandler
+	Contribution            *ContributionHandler
+	Export                  *ExportHandler
+	NotificationPreferences *NotificationPreferencesHandler
 }
 
 // RegisterRoutes mounts all API routes under /api/v1, plus a top-level
@@ -32,4 +36,8 @@ func RegisterRoutes(e *echo.Echo, h *Handlers) {
 	h.Task.RegisterRoutes(v1)
 	h.Expense.RegisterRoutes(v1)
 	h.Document.RegisterRoutes(v1)
+	h.Activity.RegisterRoutes(v1)
+	h.Contribution.RegisterRoutes(v1)
+	h.Export.RegisterRoutes(v1)
+	h.NotificationPreferences.RegisterRoutes(v1)
 }

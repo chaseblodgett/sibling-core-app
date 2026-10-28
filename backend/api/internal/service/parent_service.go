@@ -21,12 +21,13 @@ type ParentService interface {
 }
 
 type parentService struct {
-	parentRepo repository.ParentRepository
+	parentRepo   repository.ParentRepository
+	activityRepo repository.ActivityRepository
 }
 
 // NewParentService constructs a ParentService.
-func NewParentService(parentRepo repository.ParentRepository) ParentService {
-	return &parentService{parentRepo: parentRepo}
+func NewParentService(parentRepo repository.ParentRepository, activityRepo repository.ActivityRepository) ParentService {
+	return &parentService{parentRepo: parentRepo, activityRepo: activityRepo}
 }
 
 func (s *parentService) CreateParent(ctx context.Context, input models.CreateParentInput) (*models.Parent, error) {
@@ -44,6 +45,8 @@ func (s *parentService) CreateParent(ctx context.Context, input models.CreatePar
 	if err := s.parentRepo.Create(ctx, parent); err != nil {
 		return nil, err
 	}
+	actorID := input.ActorID
+	logActivity(ctx, s.activityRepo, parent.FamilyID, &actorID, input.ActorName, "parent.created", "parent", &parent.ID, parent.Name)
 	return parent, nil
 }
 

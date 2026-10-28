@@ -33,4 +33,7 @@ type UploadDocumentInput struct {
 	SizeBytes   int64
 	ParentID    *string
 	Content     io.Reader
+	// ActorName is UploadedBy's display name, for the activity-feed entry
+	// this upload produces.
+	ActorName string
 }

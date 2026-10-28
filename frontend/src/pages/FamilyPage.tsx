@@ -13,7 +13,9 @@ import {
   List,
   ListItem,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Typography,
@@ -225,6 +227,21 @@ function FamilyCard({ family, color }: { family: Family; color: FamilyColor }) {
     }
   }
 
+  async function handleChangeRole(member: Member, role: Member["role"]) {
+    setError(null);
+    try {
+      const updated = await familyApi.updateMemberRole(family.id, member.id, role);
+      setMembers((prev) => prev.map((m) => (m.id === member.id ? updated : m)));
+      notify(
+        role === "viewer"
+          ? `${member.full_name || member.email} can now see this family but not change anything.`
+          : `${member.full_name || member.email} can now edit this family again.`,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't change that member's role.");
+    }
+  }
+
   function handleCopyInviteCode() {
     navigator.clipboard.writeText(family.invite_code).then(() => {
       setCopied(true);
@@ -314,15 +331,26 @@ function FamilyCard({ family, color }: { family: Family; color: FamilyColor }) {
             secondaryAction={
               isOwner &&
               member.user_id !== user?.id && (
-                <IconButton edge="end" aria-label="Remove member" onClick={() => confirmRemove(member)}>
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Select
+                    size="small"
+                    value={member.role === "owner" ? "member" : member.role}
+                    onChange={(e) => handleChangeRole(member, e.target.value as Member["role"])}
+                    sx={{ minWidth: 110 }}
+                  >
+                    <MenuItem value="member">Member</MenuItem>
+                    <MenuItem value="viewer">Viewer</MenuItem>
+                  </Select>
+                  <IconButton edge="end" aria-label="Remove member" onClick={() => confirmRemove(member)}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
               )
             }
           >
             <ListItemText
               primary={member.full_name || member.email}
-              secondary={member.role === "owner" ? "Owner" : "Member"}
+              secondary={member.role === "owner" ? "Owner" : member.role === "viewer" ? "Viewer (read-only)" : "Member"}
             />
           </ListItem>
         ))}

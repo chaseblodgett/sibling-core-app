@@ -52,6 +52,9 @@ func (h *DocumentHandler) UploadDocument(c *echo.Context) error {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
+	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -76,6 +79,7 @@ func (h *DocumentHandler) UploadDocument(c *echo.Context) error {
 		SizeBytes:   fileHeader.Size,
 		ParentID:    parentID,
 		Content:     file,
+		ActorName:   memberDisplayName(requester),
 	})
 	if err != nil {
 		status, msg := mapDocumentError(err)
@@ -165,9 +169,13 @@ func (h *DocumentHandler) DeleteDocument(c *echo.Context) error {
 		status, msg := mapDocumentError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, doc.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, doc.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	if err := h.documentService.DeleteDocument(ctx, doc.ID); err != nil {

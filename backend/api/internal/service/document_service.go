@@ -35,11 +35,12 @@ type documentService struct {
 	documentRepo repository.DocumentRepository
 	parentRepo   repository.ParentRepository
 	storage      storage.Storage
+	activityRepo repository.ActivityRepository
 }
 
 // NewDocumentService constructs a DocumentService.
-func NewDocumentService(documentRepo repository.DocumentRepository, parentRepo repository.ParentRepository, store storage.Storage) DocumentService {
-	return &documentService{documentRepo: documentRepo, parentRepo: parentRepo, storage: store}
+func NewDocumentService(documentRepo repository.DocumentRepository, parentRepo repository.ParentRepository, store storage.Storage, activityRepo repository.ActivityRepository) DocumentService {
+	return &documentService{documentRepo: documentRepo, parentRepo: parentRepo, storage: store, activityRepo: activityRepo}
 }
 
 func (s *documentService) UploadDocument(ctx context.Context, input models.UploadDocumentInput) (*models.Document, error) {
@@ -89,6 +90,7 @@ func (s *documentService) UploadDocument(ctx context.Context, input models.Uploa
 		}
 		return nil, err
 	}
+	logActivity(ctx, s.activityRepo, doc.FamilyID, &doc.UploadedBy, input.ActorName, "document.uploaded", "document", &doc.ID, doc.FileName)
 	return doc, nil
 }
 

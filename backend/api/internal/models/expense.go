@@ -13,9 +13,15 @@ type Expense struct {
 	Currency    string    `json:"currency" db:"currency"`
 	Category    string    `json:"category" db:"category"`
 	ParentID    *string   `json:"parent_id,omitempty" db:"parent_id"`
+	DocumentID  *string   `json:"document_id,omitempty" db:"document_id"` // optional linked receipt
 	IncurredAt  time.Time `json:"incurred_at" db:"incurred_at"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// AttachReceiptRequest is the JSON body for POST /expenses/:id/receipt.
+type AttachReceiptRequest struct {
+	DocumentID string `json:"document_id"`
 }
 
 // Balance is a computed (not persisted) summary of what one member owes or
@@ -64,4 +70,9 @@ type CreateExpenseInput struct {
 	Category    string
 	ParentID    *string
 	Splits      []SplitInput
+	// ActorID/ActorName identify who logged this expense (the requester,
+	// which may differ from PaidBy — logging a sibling's receipt on their
+	// behalf), for the activity-feed entry this create produces.
+	ActorID   string
+	ActorName string
 }

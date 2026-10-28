@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	"sibling-core/api/internal/mailer"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 )
@@ -38,19 +41,71 @@ type TaskService interface {
 	// ListTasks returns a family's tasks, optionally filtered to a parent.
 	ListTasks(ctx context.Context, familyID string, parentID *string) ([]*models.Task, error)
 	UpdateTask(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error)
-	AssignTask(ctx context.Context, id, memberID string) (*models.Task, error)
+	// AssignTask assigns a task to memberID. actorID/actorName identify
+	// who's making the assignment, for the task-assigned email.
+	AssignTask(ctx context.Context, id, memberID, actorID, actorName string) (*models.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 }
 
 type taskService struct {
-	taskRepo   repository.TaskRepository
-	memberRepo repository.MemberRepository
-	parentRepo repository.ParentRepository
+	taskRepo              repository.TaskRepository
+	memberRepo            repository.MemberRepository
+	parentRepo            repository.ParentRepository
+	activityRepo          repository.ActivityRepository
+	notificationPrefsRepo repository.NotificationPreferencesRepository
+	mailer                mailer.Mailer
 }
 
 // NewTaskService constructs a TaskService.
-func NewTaskService(taskRepo repository.TaskRepository, memberRepo repository.MemberRepository, parentRepo repository.ParentRepository) TaskService {
-	return &taskService{taskRepo: taskRepo, memberRepo: memberRepo, parentRepo: parentRepo}
+func NewTaskService(taskRepo repository.TaskRepository, memberRepo repository.MemberRepository, parentRepo repository.ParentRepository, activityRepo repository.ActivityRepository, notificationPrefsRepo repository.NotificationPreferencesRepository, mailService mailer.Mailer) TaskService {
+	return &taskService{
+		taskRepo:              taskRepo,
+		memberRepo:            memberRepo,
+		parentRepo:            parentRepo,
+		activityRepo:          activityRepo,
+		notificationPrefsRepo: notificationPrefsRepo,
+		mailer:                mailService,
+	}
+}
+
+// maybeSendTaskAssignedEmail notifies a task's new assignee, best-effort
+// — a failed send never fails the write that triggered it, same
+// precedent as sendInviteEmail and logActivity. Never emails the actor
+// about their own action, and respects an opt-out in
+// NotificationPreferences (a missing row means "send," the same way a
+// missing ActivityEntry.ActorID means "can't attribute" elsewhere —
+// absence has its own meaning per table, not a universal default).
+func (s *taskService) maybeSendTaskAssignedEmail(ctx context.Context, assigneeMemberID, actorID, actorName, taskTitle string) {
+	if assigneeMemberID == "" || assigneeMemberID == actorID {
+		return
+	}
+	assignee, err := s.memberRepo.GetByID(ctx, assigneeMemberID)
+	if err != nil {
+		log.Printf("task assigned email: couldn't load assignee %s: %v", assigneeMemberID, err)
+		return
+	}
+
+	enabled := true
+	prefs, err := s.notificationPrefsRepo.GetByUserID(ctx, assignee.UserID)
+	if err != nil && !errors.Is(err, repository.ErrNotificationPreferencesNotFound) {
+		log.Printf("task assigned email: couldn't load preferences for %s: %v", assignee.UserID, err)
+		return
+	}
+	if prefs != nil {
+		enabled = prefs.TaskAssignedEmail
+	}
+	if !enabled {
+		return
+	}
+
+	if err := s.mailer.SendTaskAssigned(ctx, mailer.TaskAssignedEmail{
+		To:           assignee.Email,
+		AssigneeName: assignee.FullName,
+		TaskTitle:    taskTitle,
+		AssignedBy:   actorName,
+	}); err != nil {
+		log.Printf("task assigned email: send to %s failed: %v", assignee.Email, err)
+	}
 }
 
 func (s *taskService) CreateTask(ctx context.Context, input models.CreateTaskInput) (*models.Task, error) {
@@ -90,6 +145,10 @@ func (s *taskService) CreateTask(ctx context.Context, input models.CreateTaskInp
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		return nil, err
 	}
+	logActivity(ctx, s.activityRepo, task.FamilyID, &task.CreatedBy, input.ActorName, "task.created", "task", &task.ID, task.Title)
+	if task.AssigneeID != nil {
+		s.maybeSendTaskAssignedEmail(ctx, *task.AssigneeID, task.CreatedBy, input.ActorName, task.Title)
+	}
 	return task, nil
 }
 
@@ -107,6 +166,10 @@ func (s *taskService) UpdateTask(ctx context.Context, id string, input models.Up
 		return nil, err
 	}
 	wasDone := task.Status == "done"
+	var previousAssigneeID string
+	if task.AssigneeID != nil {
+		previousAssigneeID = *task.AssigneeID
+	}
 
 	if input.Title != nil {
 		title := strings.TrimSpace(*input.Title)
@@ -155,6 +218,10 @@ func (s *taskService) UpdateTask(ctx context.Context, id string, input models.Up
 	// recurring. Only on a true not-done -> done transition, so replaying
 	// the same PATCH (or editing an already-done task) doesn't spawn
 	// duplicates.
+	if !wasDone && task.Status == "done" {
+		actorID := input.ActorID
+		logActivity(ctx, s.activityRepo, task.FamilyID, &actorID, input.ActorName, "task.completed", "task", &task.ID, task.Title)
+	}
 	if !wasDone && task.Status == "done" && task.RecurrenceRule != "none" && task.DueDate != nil {
 		nextDue := nextDueDate(*task.DueDate, task.RecurrenceRule)
 		next := &models.Task{
@@ -172,10 +239,14 @@ func (s *taskService) UpdateTask(ctx context.Context, id string, input models.Up
 		}
 	}
 
+	if input.AssigneeID != nil && *input.AssigneeID != previousAssigneeID {
+		s.maybeSendTaskAssignedEmail(ctx, *input.AssigneeID, input.ActorID, input.ActorName, task.Title)
+	}
+
 	return task, nil
 }
 
-func (s *taskService) AssignTask(ctx context.Context, id, memberID string) (*models.Task, error) {
+func (s *taskService) AssignTask(ctx context.Context, id, memberID, actorID, actorName string) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -183,11 +254,20 @@ func (s *taskService) AssignTask(ctx context.Context, id, memberID string) (*mod
 	if err := requireMemberInFamily(ctx, s.memberRepo, memberID, task.FamilyID, "assignee"); err != nil {
 		return nil, err
 	}
+	var previousAssigneeID string
+	if task.AssigneeID != nil {
+		previousAssigneeID = *task.AssigneeID
+	}
 
 	task.AssigneeID = &memberID
 	if err := s.taskRepo.Update(ctx, task); err != nil {
 		return nil, err
 	}
+
+	if memberID != previousAssigneeID {
+		s.maybeSendTaskAssignedEmail(ctx, memberID, actorID, actorName, task.Title)
+	}
+
 	return task, nil
 }
 

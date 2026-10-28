@@ -25,6 +25,7 @@ import { parentsApi } from "../api/parents";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { FamilySection } from "../components/FamilySection";
+import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
 import { useNotify } from "../context/NotificationContext";
 import { useConfirm } from "../hooks/useConfirm";
@@ -38,6 +39,7 @@ function formatBytes(bytes: number) {
 }
 
 export function DocumentsPage() {
+  const { user } = useAuth();
   const { families, loading: familiesLoading } = useFamilies();
   const notify = useNotify();
   const { state: confirmState, confirm, close: closeConfirm, handleConfirm } = useConfirm();
@@ -86,9 +88,15 @@ export function DocumentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familiesLoading, families]);
 
+  function isViewerOf(familyId: string) {
+    return members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "viewer");
+  }
+  const writableFamilies = families.filter((f) => !isViewerOf(f.id));
+
   useEffect(() => {
-    setUploadFamilyId((prev) => prev || families[0]?.id || "");
-  }, [families]);
+    setUploadFamilyId((prev) => prev || writableFamilies[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [families, members]);
 
   const uploadFamilyParents = parents.filter((p) => p.family_id === uploadFamilyId);
 
@@ -175,10 +183,11 @@ export function DocumentsPage() {
         <Typography variant="h4" component="h1">
           Documents
         </Typography>
+        {writableFamilies.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          {families.length > 1 && (
+          {writableFamilies.length > 1 && (
             <Select size="small" value={uploadFamilyId} onChange={(e) => setUploadFamilyId(e.target.value)}>
-              {families.map((f) => (
+              {writableFamilies.map((f) => (
                 <MenuItem key={f.id} value={f.id}>
                   {f.name}
                 </MenuItem>
@@ -209,6 +218,7 @@ export function DocumentsPage() {
             {uploading ? "Uploading…" : "Upload"}
           </Button>
         </Stack>
+        )}
       </Box>
 
       {error && (
@@ -238,9 +248,11 @@ export function DocumentsPage() {
                           <IconButton edge="end" aria-label="Download" onClick={() => handleDownload(doc)}>
                             <DownloadIcon fontSize="small" />
                           </IconButton>
-                          <IconButton edge="end" aria-label="Delete document" onClick={() => confirmDelete(doc)}>
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
+                          {!isViewerOf(family.id) && (
+                            <IconButton edge="end" aria-label="Delete document" onClick={() => confirmDelete(doc)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          )}
                         </Stack>
                       }
                     >

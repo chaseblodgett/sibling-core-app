@@ -28,6 +28,8 @@ type MemberRepository interface {
 	// ListByUser returns every family membership for a user, used to let a
 	// logged-in user discover which family/families they belong to.
 	ListByUser(ctx context.Context, userID string) ([]*models.Member, error)
+	// SetRole changes a member's role (owner, member, or viewer).
+	SetRole(ctx context.Context, id, role string) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -109,6 +111,25 @@ func (r *postgresMemberRepository) ListByUser(ctx context.Context, userID string
 		return nil, err
 	}
 	return queryMembers(ctx, r.db, query, args...)
+}
+
+func (r *postgresMemberRepository) SetRole(ctx context.Context, id, role string) error {
+	query, args, err := dialect.Update(membersTable).
+		Set(goqu.Record{"role": role}).
+		Where(goqu.Ex{"id": id}).
+		Prepared(true).
+		ToSQL()
+	if err != nil {
+		return err
+	}
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMemberNotFound
+	}
+	return nil
 }
 
 func (r *postgresMemberRepository) Delete(ctx context.Context, id string) error {

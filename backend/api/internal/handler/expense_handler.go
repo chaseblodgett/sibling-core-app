@@ -37,6 +37,8 @@ func (h *ExpenseHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/expenses/:id", h.GetExpense, auth)
 	g.GET("/expenses/:id/splits", h.ListSplits, auth)
 	g.DELETE("/expenses/:id", h.DeleteExpense, auth)
+	g.POST("/expenses/:id/receipt", h.AttachReceipt, auth)
+	g.DELETE("/expenses/:id/receipt", h.RemoveReceipt, auth)
 	g.POST("/expenses/splits/:splitId/settle", h.SettleSplit, auth)
 }
 
@@ -51,6 +53,9 @@ func (h *ExpenseHandler) CreateExpense(c *echo.Context) error {
 	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	var req models.CreateExpenseRequest
@@ -77,6 +82,8 @@ func (h *ExpenseHandler) CreateExpense(c *echo.Context) error {
 		Category:    req.Category,
 		ParentID:    req.ParentID,
 		Splits:      splits,
+		ActorID:     requester.ID,
+		ActorName:   memberDisplayName(requester),
 	})
 	if err != nil {
 		status, msg := mapExpenseError(err)
@@ -179,9 +186,13 @@ func (h *ExpenseHandler) DeleteExpense(c *echo.Context) error {
 		status, msg := mapExpenseError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	if err := h.expenseService.DeleteExpense(ctx, expense.ID); err != nil {
@@ -189,6 +200,66 @@ func (h *ExpenseHandler) DeleteExpense(c *echo.Context) error {
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// AttachReceipt links an already-uploaded document (same family) to an
+// expense as its receipt.
+func (h *ExpenseHandler) AttachReceipt(c *echo.Context) error {
+	ctx := c.Request().Context()
+	user := middleware.CurrentUser(c)
+
+	expense, err := h.expenseService.GetExpense(ctx, c.Param("id"))
+	if err != nil {
+		status, msg := mapExpenseError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID)
+	if err != nil {
+		status, msg := mapFamilyError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
+	}
+
+	var req models.AttachReceiptRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: err.Error()})
+	}
+
+	updated, err := h.expenseService.AttachReceipt(ctx, expense.ID, req.DocumentID)
+	if err != nil {
+		status, msg := mapExpenseError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	return c.JSON(http.StatusOK, updated)
+}
+
+// RemoveReceipt unlinks whatever receipt document is attached to an expense.
+func (h *ExpenseHandler) RemoveReceipt(c *echo.Context) error {
+	ctx := c.Request().Context()
+	user := middleware.CurrentUser(c)
+
+	expense, err := h.expenseService.GetExpense(ctx, c.Param("id"))
+	if err != nil {
+		status, msg := mapExpenseError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID)
+	if err != nil {
+		status, msg := mapFamilyError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
+	}
+
+	updated, err := h.expenseService.RemoveReceipt(ctx, expense.ID)
+	if err != nil {
+		status, msg := mapExpenseError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	return c.JSON(http.StatusOK, updated)
 }
 
 // SettleSplit marks a member's share of an expense as settled. Membership
@@ -210,9 +281,13 @@ func (h *ExpenseHandler) SettleSplit(c *echo.Context) error {
 		status, msg := mapExpenseError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, expense.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	updated, err := h.expenseService.SettleSplit(ctx, splitID)

@@ -8,6 +8,7 @@ import type { Parent, ParentKeyInfo as ParentKeyInfoFields } from "../types";
 interface ParentKeyInfoProps {
   parent: Parent;
   onSaved: (updated: Parent) => void;
+  readOnly?: boolean;
 }
 
 function fieldsFrom(parent: Parent): ParentKeyInfoFields {
@@ -30,7 +31,7 @@ function fieldsFrom(parent: Parent): ParentKeyInfoFields {
 const KEY_INFO_BG = "#f9e79f";
 const KEY_INFO_BORDER = "#dd5b00";
 
-export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
+export function ParentKeyInfo({ parent, onSaved, readOnly = false }: ParentKeyInfoProps) {
   const notify = useNotify();
   const [form, setForm] = useState<ParentKeyInfoFields>(fieldsFrom(parent));
   const [saving, setSaving] = useState(false);
@@ -75,6 +76,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.doctor_name}
             onChange={(e) => set("doctor_name", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
           <TextField
             label="Doctor phone"
@@ -82,6 +84,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.doctor_phone}
             onChange={(e) => set("doctor_phone", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
         </Stack>
         <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -91,6 +94,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.emergency_contact_name}
             onChange={(e) => set("emergency_contact_name", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
           <TextField
             label="Emergency contact phone"
@@ -98,6 +102,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.emergency_contact_phone}
             onChange={(e) => set("emergency_contact_phone", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
         </Stack>
         <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -107,6 +112,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.insurance_provider}
             onChange={(e) => set("insurance_provider", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
           <TextField
             label="Insurance member ID"
@@ -114,6 +120,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
             value={form.insurance_member_id}
             onChange={(e) => set("insurance_member_id", e.target.value)}
             sx={{ flex: 1, minWidth: 180, bgcolor: "background.paper" }}
+            slotProps={{ input: { readOnly } }}
           />
         </Stack>
         <TextField
@@ -125,6 +132,7 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
           minRows={2}
           fullWidth
           sx={{ bgcolor: "background.paper" }}
+          slotProps={{ input: { readOnly } }}
         />
         <TextField
           label="Medications"
@@ -136,12 +144,15 @@ export function ParentKeyInfo({ parent, onSaved }: ParentKeyInfoProps) {
           fullWidth
           helperText="A readable list for someone else, not a dosage chart."
           sx={{ bgcolor: "background.paper" }}
+          slotProps={{ input: { readOnly } }}
         />
-        <Box>
-          <Button variant="contained" size="small" onClick={handleSave} disabled={saving}>
-            Save key info
-          </Button>
-        </Box>
+        {!readOnly && (
+          <Box>
+            <Button variant="contained" size="small" onClick={handleSave} disabled={saving}>
+              Save key info
+            </Button>
+          </Box>
+        )}
       </Stack>
     </Box>
   );

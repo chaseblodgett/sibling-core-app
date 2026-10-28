@@ -11,6 +11,7 @@ import {
   Box,
   Button,
   CircularProgress,
+  Divider,
   Grid,
   List,
   ListItem,
@@ -23,19 +24,23 @@ import {
 } from "@mui/material";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import { activityApi } from "../api/activity";
 import { ApiError } from "../api/client";
+import { contributionsApi } from "../api/contributions";
 import { documentsApi } from "../api/documents";
 import { expensesApi } from "../api/expenses";
 import { familyApi } from "../api/family";
 import { parentsApi } from "../api/parents";
 import { tasksApi } from "../api/tasks";
+import { ActivityFeed } from "../components/ActivityFeed";
+import { ContributionLeaderboard } from "../components/ContributionLeaderboard";
 import { FamilySection } from "../components/FamilySection";
 import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
 import { useNotify } from "../context/NotificationContext";
 import { familyColorMap } from "../utils/familyColor";
 import type { FamilyColor } from "../utils/familyColor";
-import type { Family } from "../types";
+import type { ActivityEntry, Contribution, Family } from "../types";
 
 interface FamilyStats {
   openTasks: number;
@@ -54,6 +59,8 @@ export function DashboardPage() {
   const notify = useNotify();
 
   const [stats, setStats] = useState<Record<string, FamilyStats>>({});
+  const [activity, setActivity] = useState<Record<string, ActivityEntry[]>>({});
+  const [contributions, setContributions] = useState<Record<string, Contribution[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,29 +80,37 @@ export function DashboardPage() {
     setError(null);
 
     Promise.all(
-      families.map(async (family): Promise<[string, FamilyStats]> => {
-        const [tasks, documents, members, balances, parents] = await Promise.all([
+      families.map(async (family) => {
+        const [tasks, documents, members, balances, parents, recentActivity, memberContributions] = await Promise.all([
           tasksApi.list(family.id),
           documentsApi.list(family.id),
           familyApi.listMembers(family.id),
           expensesApi.balances(family.id),
           parentsApi.list(family.id),
+          activityApi.list(family.id, 5),
+          contributionsApi.list(family.id),
         ]);
         const myMemberId = members.find((m) => m.user_id === user?.id)?.id;
         const myBalance = balances.find((b) => b.member_id === myMemberId);
-        return [
-          family.id,
-          {
+        return {
+          familyId: family.id,
+          stats: {
             openTasks: tasks.filter((t) => t.status !== "done").length,
             balanceCents: myBalance?.net_cents ?? null,
             documents: documents.length,
             parents: parents.length,
-          },
-        ];
+          } satisfies FamilyStats,
+          activity: recentActivity,
+          contributions: memberContributions,
+        };
       }),
     )
       .then((entries) => {
-        if (!cancelled) setStats(Object.fromEntries(entries));
+        if (!cancelled) {
+          setStats(Object.fromEntries(entries.map((e) => [e.familyId, e.stats])));
+          setActivity(Object.fromEntries(entries.map((e) => [e.familyId, e.activity])));
+          setContributions(Object.fromEntries(entries.map((e) => [e.familyId, e.contributions])));
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : "Couldn't load your dashboard.");
@@ -244,6 +259,8 @@ export function DashboardPage() {
             family={family}
             color={colors.get(family.id)!}
             stats={stats[family.id]}
+            activity={activity[family.id]}
+            contributions={contributions[family.id]}
           />
         ))}
       </Stack>
@@ -251,7 +268,19 @@ export function DashboardPage() {
   );
 }
 
-function FamilyDashboardBlock({ family, color, stats }: { family: Family; color: FamilyColor; stats?: FamilyStats }) {
+function FamilyDashboardBlock({
+  family,
+  color,
+  stats,
+  activity,
+  contributions,
+}: {
+  family: Family;
+  color: FamilyColor;
+  stats?: FamilyStats;
+  activity?: ActivityEntry[];
+  contributions?: Contribution[];
+}) {
   // A "fresh" family (no parent tracked yet, no tasks ever created) gets a
   // short checklist pointing at the two things that actually unlock the
   // rest of the app, instead of three stat tiles that all read zero.
@@ -297,6 +326,7 @@ function FamilyDashboardBlock({ family, color, stats }: { family: Family; color:
           />
         </List>
       ) : (
+        <>
         <Grid container spacing={0} sx={{ p: 2 }}>
           <Grid size={{ xs: 6, sm: 3 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
@@ -348,6 +378,21 @@ function FamilyDashboardBlock({ family, color, stats }: { family: Family; color:
             </Stack>
           </Grid>
         </Grid>
+        <Divider />
+        <Box sx={{ px: 1, pt: 1 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ pl: 1 }}>
+            Recent activity
+          </Typography>
+          <ActivityFeed entries={activity ?? []} />
+        </Box>
+        <Divider />
+        <Box sx={{ px: 1, py: 1 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ pl: 1 }}>
+            Who's contributing
+          </Typography>
+          <ContributionLeaderboard entries={contributions ?? []} />
+        </Box>
+        </>
       )}
     </FamilySection>
   );

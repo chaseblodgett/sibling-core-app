@@ -1,6 +1,8 @@
 import AddIcon from "@mui/icons-material/Add";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
 import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import DownloadIcon from "@mui/icons-material/Download";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
   Alert,
@@ -23,9 +25,11 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
+import { documentsApi } from "../api/documents";
 import { expensesApi } from "../api/expenses";
+import { exportApi } from "../api/export";
 import { familyApi } from "../api/family";
 import { parentsApi } from "../api/parents";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -36,7 +40,7 @@ import { useFamilies } from "../context/FamilyContext";
 import { useNotify } from "../context/NotificationContext";
 import { useConfirm } from "../hooks/useConfirm";
 import { familyColorMap } from "../utils/familyColor";
-import type { Balance, Expense, ExpenseSplit, Family, Member, Parent } from "../types";
+import type { Balance, Document, Expense, ExpenseSplit, Family, Member, Parent } from "../types";
 
 function formatCents(cents: number, currency = "USD") {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency });
@@ -100,9 +104,15 @@ export function ExpensesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familiesLoading, families]);
 
+  function isViewerOf(familyId: string) {
+    return members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "viewer");
+  }
+  const writableFamilies = families.filter((f) => !isViewerOf(f.id));
+
   useEffect(() => {
-    setCreateFamilyId((prev) => prev || families[0]?.id || "");
-  }, [families]);
+    setCreateFamilyId((prev) => prev || writableFamilies[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [families, members]);
 
   const createFamilyParents = parents.filter((p) => p.family_id === createFamilyId);
   const createFamilyMembers = members.filter((m) => m.family_id === createFamilyId);
@@ -231,6 +241,7 @@ export function ExpensesPage() {
       )}
 
       <Stack spacing={2}>
+        {writableFamilies.length > 0 && (
         <Paper sx={{ p: 3 }}>
           <Stack spacing={2} component="form" onSubmit={handleCreate}>
             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -261,9 +272,9 @@ export function ExpensesPage() {
               />
             </Stack>
             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", alignItems: "center" }}>
-              {families.length > 1 && (
+              {writableFamilies.length > 1 && (
                 <Select size="small" value={createFamilyId} onChange={(e) => setCreateFamilyId(e.target.value)}>
-                  {families.map((f) => (
+                  {writableFamilies.map((f) => (
                     <MenuItem key={f.id} value={f.id}>
                       {f.name}
                     </MenuItem>
@@ -322,12 +333,27 @@ export function ExpensesPage() {
             </Box>
           </Stack>
         </Paper>
+        )}
 
         {families.map((family) => {
           const familyExpenses = expenses.filter((e) => e.family_id === family.id);
           const familyBalances = balancesByFamily[family.id] ?? [];
           return (
-            <FamilySection key={family.id} family={family} color={colors.get(family.id)!}>
+            <FamilySection
+              key={family.id}
+              family={family}
+              color={colors.get(family.id)!}
+              action={
+                <Button
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => exportApi.expenses(family.id).catch(() => notify("Couldn't export expenses.", "error"))}
+                  sx={{ color: colors.get(family.id)!.text }}
+                >
+                  Export CSV
+                </Button>
+              }
+            >
               {familyBalances.length > 0 && (
                 <>
                   <List dense sx={{ px: 1 }}>
@@ -358,6 +384,8 @@ export function ExpensesPage() {
                     <ExpenseRow
                       key={expense.id}
                       expense={expense}
+                      familyId={family.id}
+                      isViewer={isViewerOf(family.id)}
                       parentLabel={parentName(expense.parent_id)}
                       paidByLabel={memberName(expense.paid_by)}
                       memberName={memberName}
@@ -388,12 +416,16 @@ export function ExpensesPage() {
 
 function ExpenseRow({
   expense,
+  familyId,
+  isViewer,
   parentLabel,
   paidByLabel,
   memberName,
   onDelete,
 }: {
   expense: Expense;
+  familyId: string;
+  isViewer: boolean;
   parentLabel?: string;
   paidByLabel?: string;
   memberName: (id?: string) => string | undefined;
@@ -403,6 +435,30 @@ function ExpenseRow({
   const [expanded, setExpanded] = useState(false);
   const [splits, setSplits] = useState<ExpenseSplit[]>([]);
   const [splitsLoaded, setSplitsLoaded] = useState(false);
+
+  const [documentId, setDocumentId] = useState(expense.document_id);
+  const [receipt, setReceipt] = useState<Document | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!documentId) {
+      setReceipt(null);
+      return;
+    }
+    let cancelled = false;
+    documentsApi
+      .get(documentId)
+      .then((doc) => {
+        if (!cancelled) setReceipt(doc);
+      })
+      .catch(() => {
+        // best-effort — the row still works without the receipt's filename
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId]);
 
   async function toggleExpand() {
     setExpanded((prev) => !prev);
@@ -422,20 +478,79 @@ function ExpenseRow({
     notify("Marked settled.");
   }
 
+  async function handleReceiptChosen(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setAttaching(true);
+    try {
+      const uploaded = await documentsApi.upload(familyId, file, expense.parent_id);
+      const updated = await expensesApi.attachReceipt(expense.id, uploaded.id);
+      setDocumentId(updated.document_id);
+      notify("Receipt attached.");
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "Couldn't attach that receipt.", "error");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function handleRemoveReceipt() {
+    try {
+      const updated = await expensesApi.removeReceipt(expense.id);
+      setDocumentId(updated.document_id);
+      notify("Receipt removed.");
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "Couldn't remove that receipt.", "error");
+    }
+  }
+
   return (
     <>
       <ListItem
         secondaryAction={
           <Stack direction="row" spacing={0.5}>
+            {!isViewer && <input ref={fileInputRef} type="file" hidden onChange={handleReceiptChosen} accept="image/*,.pdf" />}
+            {documentId ? (
+              <>
+                <IconButton
+                  edge="end"
+                  aria-label="Download receipt"
+                  onClick={() => receipt && documentsApi.download(receipt)}
+                  disabled={!receipt}
+                >
+                  <AttachFileIcon fontSize="small" color="primary" />
+                </IconButton>
+                {!isViewer && (
+                  <IconButton edge="end" aria-label="Remove receipt" onClick={handleRemoveReceipt}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </>
+            ) : (
+              !isViewer && (
+                <IconButton
+                  edge="end"
+                  aria-label="Attach receipt"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={attaching}
+                >
+                  <AttachFileIcon fontSize="small" />
+                </IconButton>
+              )
+            )}
             <IconButton edge="end" aria-label="Show splits" onClick={toggleExpand}>
               <ExpandMoreIcon
                 fontSize="small"
                 sx={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
               />
             </IconButton>
-            <IconButton edge="end" aria-label="Delete expense" onClick={onDelete}>
-              <DeleteOutlineIcon fontSize="small" />
-            </IconButton>
+            {!isViewer && (
+              <IconButton edge="end" aria-label="Delete expense" onClick={onDelete}>
+                <DeleteOutlineIcon fontSize="small" />
+              </IconButton>
+            )}
           </Stack>
         }
       >
@@ -446,6 +561,7 @@ function ExpenseRow({
               <Chip label={formatCents(expense.amount_cents, expense.currency)} size="small" color="primary" />
               {expense.category && <Chip label={expense.category} size="small" variant="outlined" />}
               {parentLabel && <Chip label={parentLabel} size="small" />}
+              {documentId && <Chip label={receipt?.file_name ?? "Receipt attached"} size="small" variant="outlined" />}
             </Stack>
           }
           secondary={paidByLabel ? `Paid by ${paidByLabel}` : undefined}
@@ -458,6 +574,8 @@ function ExpenseRow({
               <ListItemText primary={memberName(split.member_id)} secondary={`Owes ${formatCents(split.share_cents)}`} />
               {split.settled ? (
                 <Chip label="Settled" size="small" color="success" variant="outlined" />
+              ) : isViewer ? (
+                <Chip label="Unsettled" size="small" variant="outlined" />
               ) : (
                 <Button size="small" onClick={() => handleSettle(split.id)}>
                   Mark settled

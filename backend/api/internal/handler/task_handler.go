@@ -53,6 +53,9 @@ func (h *TaskHandler) CreateTask(c *echo.Context) error {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
+	}
 
 	var req models.CreateTaskRequest
 	if err := c.Bind(&req); err != nil {
@@ -68,6 +71,7 @@ func (h *TaskHandler) CreateTask(c *echo.Context) error {
 		CreatedBy:      requester.ID,
 		DueDate:        req.DueDate,
 		RecurrenceRule: req.RecurrenceRule,
+		ActorName:      memberDisplayName(requester),
 	})
 	if err != nil {
 		status, msg := mapTaskError(err)
@@ -128,9 +132,13 @@ func (h *TaskHandler) UpdateTask(c *echo.Context) error {
 		status, msg := mapTaskError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	var req models.UpdateTaskRequest
@@ -146,6 +154,8 @@ func (h *TaskHandler) UpdateTask(c *echo.Context) error {
 		ParentID:       req.ParentID,
 		DueDate:        req.DueDate,
 		RecurrenceRule: req.RecurrenceRule,
+		ActorID:        requester.ID,
+		ActorName:      memberDisplayName(requester),
 	})
 	if err != nil {
 		status, msg := mapTaskError(err)
@@ -164,9 +174,13 @@ func (h *TaskHandler) AssignTask(c *echo.Context) error {
 		status, msg := mapTaskError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	var req models.AssignTaskRequest
@@ -174,7 +188,7 @@ func (h *TaskHandler) AssignTask(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: err.Error()})
 	}
 
-	updated, err := h.taskService.AssignTask(ctx, task.ID, req.MemberID)
+	updated, err := h.taskService.AssignTask(ctx, task.ID, req.MemberID, requester.ID, memberDisplayName(requester))
 	if err != nil {
 		status, msg := mapTaskError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
@@ -192,9 +206,13 @@ func (h *TaskHandler) DeleteTask(c *echo.Context) error {
 		status, msg := mapTaskError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, task.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	if err := h.taskService.DeleteTask(ctx, task.ID); err != nil {

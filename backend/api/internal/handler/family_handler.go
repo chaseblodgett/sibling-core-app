@@ -36,6 +36,7 @@ func (h *FamilyHandler) RegisterRoutes(g *echo.Group) {
 	fg.POST("/:id/invites", h.InviteMember)
 	fg.GET("/:id/members", h.ListMembers)
 	fg.DELETE("/:id/members/:memberId", h.RemoveMember)
+	fg.PATCH("/:id/members/:memberId/role", h.UpdateMemberRole)
 }
 
 // CreateFamily creates a new family group with the requester as owner.
@@ -176,6 +177,35 @@ func (h *FamilyHandler) RemoveMember(c *echo.Context) error {
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// UpdateMemberRole changes a member's role (owner, member, or viewer).
+// Only the family's owner may change roles.
+func (h *FamilyHandler) UpdateMemberRole(c *echo.Context) error {
+	ctx := c.Request().Context()
+	user := middleware.CurrentUser(c)
+	familyID := c.Param("id")
+
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, familyID)
+	if err != nil {
+		status, msg := mapFamilyError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if requester.Role != "owner" {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: service.ErrNotAuthorized.Error()})
+	}
+
+	var req models.UpdateMemberRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: err.Error()})
+	}
+
+	updated, err := h.familyService.UpdateMemberRole(ctx, familyID, c.Param("memberId"), req.Role)
+	if err != nil {
+		status, msg := mapFamilyError(err)
+		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	return c.JSON(http.StatusOK, updated)
 }
 
 func mapFamilyError(err error) (int, string) {

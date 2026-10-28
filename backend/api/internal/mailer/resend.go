@@ -85,6 +85,61 @@ func (m *resendMailer) SendFamilyInvite(ctx context.Context, email FamilyInviteE
 	return nil
 }
 
+func (m *resendMailer) SendTaskAssigned(ctx context.Context, email TaskAssignedEmail) error {
+	subject := fmt.Sprintf("You've been assigned a task on Caretree: %s", email.TaskTitle)
+
+	body := resendRequest{
+		From:    m.from,
+		To:      []string{email.To},
+		Subject: subject,
+		HTML:    taskAssignedHTML(email),
+		Text:    taskAssignedText(email),
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encoding resend request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, resendEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("building resend request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("calling resend: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		var errResp resendErrorResponse
+		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Message != "" {
+			return fmt.Errorf("resend returned %d: %s", resp.StatusCode, errResp.Message)
+		}
+		return fmt.Errorf("resend returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func taskAssignedText(email TaskAssignedEmail) string {
+	return fmt.Sprintf(
+		"%s assigned you a task on Caretree: %q",
+		email.AssignedBy, email.TaskTitle,
+	)
+}
+
+func taskAssignedHTML(email TaskAssignedEmail) string {
+	return fmt.Sprintf(`<p>%s assigned you a task on Caretree:</p>
+<p style="font-size:18px;font-weight:600;">%s</p>`,
+		email.AssignedBy, email.TaskTitle,
+	)
+}
+
 func familyInviteText(email FamilyInviteEmail) string {
 	return fmt.Sprintf(
 		"%s invited you to join %q on Caretree.\n\nUse invite code %s to join: open the app, choose \"Join a family\", and enter this code.",

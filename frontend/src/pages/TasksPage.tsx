@@ -1,6 +1,7 @@
 import AddIcon from "@mui/icons-material/Add";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import DownloadIcon from "@mui/icons-material/Download";
 import RepeatIcon from "@mui/icons-material/Repeat";
 import {
   Alert,
@@ -22,12 +23,14 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { exportApi } from "../api/export";
 import { familyApi } from "../api/family";
 import { parentsApi } from "../api/parents";
 import { tasksApi } from "../api/tasks";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { FamilySection } from "../components/FamilySection";
+import { useAuth } from "../context/AuthContext";
 import { useFamilies } from "../context/FamilyContext";
 import { useNotify } from "../context/NotificationContext";
 import { useConfirm } from "../hooks/useConfirm";
@@ -61,6 +64,7 @@ function formatDueDate(dueDate: string) {
 }
 
 export function TasksPage() {
+  const { user } = useAuth();
   const { families, loading: familiesLoading } = useFamilies();
   const notify = useNotify();
   const { state: confirmState, confirm, close: closeConfirm, handleConfirm } = useConfirm();
@@ -115,9 +119,15 @@ export function TasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familiesLoading, families, parentFilter]);
 
+  function isViewerOf(familyId: string) {
+    return members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "viewer");
+  }
+  const writableFamilies = families.filter((f) => !isViewerOf(f.id));
+
   useEffect(() => {
-    setCreateFamilyId((prev) => prev || families[0]?.id || "");
-  }, [families]);
+    setCreateFamilyId((prev) => prev || writableFamilies[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [families, members]);
 
   const createFamilyParents = parents.filter((p) => p.family_id === createFamilyId);
   const createFamilyMembers = members.filter((m) => m.family_id === createFamilyId);
@@ -249,6 +259,7 @@ export function TasksPage() {
       )}
 
       <Stack spacing={2}>
+        {writableFamilies.length > 0 && (
         <Paper sx={{ p: 3 }}>
           <Stack spacing={2} component="form" onSubmit={handleCreate}>
             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -269,7 +280,7 @@ export function TasksPage() {
               />
             </Stack>
             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", alignItems: "center" }}>
-              {families.length > 1 && (
+              {writableFamilies.length > 1 && (
                 <Select
                   size="small"
                   value={createFamilyId}
@@ -280,7 +291,7 @@ export function TasksPage() {
                   }}
                   sx={{ minWidth: 180 }}
                 >
-                  {families.map((f) => (
+                  {writableFamilies.map((f) => (
                     <MenuItem key={f.id} value={f.id}>
                       {f.name}
                     </MenuItem>
@@ -342,6 +353,7 @@ export function TasksPage() {
             </Stack>
           </Stack>
         </Paper>
+        )}
 
         {families
           .filter((f) => !parentFilter || tasks.some((t) => t.family_id === f.id))
@@ -359,7 +371,21 @@ export function TasksPage() {
                 return 0;
               });
             return (
-              <FamilySection key={family.id} family={family} color={colors.get(family.id)!}>
+              <FamilySection
+                key={family.id}
+                family={family}
+                color={colors.get(family.id)!}
+                action={
+                  <Button
+                    size="small"
+                    startIcon={<DownloadIcon />}
+                    onClick={() => exportApi.tasks(family.id).catch(() => notify("Couldn't export tasks.", "error"))}
+                    sx={{ color: colors.get(family.id)!.text }}
+                  >
+                    Export CSV
+                  </Button>
+                }
+              >
                 {familyTasks.length === 0 ? (
                   <EmptyState
                     icon={<AssignmentIcon />}
@@ -372,9 +398,11 @@ export function TasksPage() {
                       <ListItem
                         key={task.id}
                         secondaryAction={
-                          <IconButton edge="end" aria-label="Delete task" onClick={() => confirmDelete(task)}>
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
+                          !isViewerOf(task.family_id) && (
+                            <IconButton edge="end" aria-label="Delete task" onClick={() => confirmDelete(task)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          )
                         }
                       >
                         <ListItemText
@@ -411,6 +439,7 @@ export function TasksPage() {
                           size="small"
                           value={task.status}
                           onChange={(e) => handleStatusChange(task, e.target.value as TaskStatus)}
+                          disabled={isViewerOf(task.family_id)}
                           sx={{ minWidth: 140, mr: 2 }}
                         >
                           {Object.entries(STATUS_LABEL).map(([value, label]) => (

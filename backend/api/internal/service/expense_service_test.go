@@ -18,11 +18,112 @@ func newTestExpenseService(t *testing.T) (service.ExpenseService, *mockrepositor
 	expenseRepo := &mockrepository.MockExpenseRepository{}
 	memberRepo := &mockrepository.MockMemberRepository{}
 	parentRepo := &mockrepository.MockParentRepository{}
-	return service.NewExpenseService(expenseRepo, memberRepo, parentRepo), expenseRepo, memberRepo, parentRepo
+	activityRepo := &mockrepository.MockActivityRepository{}
+	documentRepo := &mockrepository.MockDocumentRepository{}
+	return service.NewExpenseService(expenseRepo, memberRepo, parentRepo, documentRepo, activityRepo), expenseRepo, memberRepo, parentRepo
 }
 
 func familyMember(id, familyID string) *models.Member {
 	return &models.Member{ID: id, FamilyID: familyID}
+}
+
+func TestCreateExpenseLogsActivity(t *testing.T) {
+	expenseRepo := &mockrepository.MockExpenseRepository{}
+	memberRepo := &mockrepository.MockMemberRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewExpenseService(expenseRepo, memberRepo, &mockrepository.MockParentRepository{}, &mockrepository.MockDocumentRepository{}, activityRepo)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return familyMember(id, "family-1"), nil
+	}
+	expenseRepo.CreateFunc = func(ctx context.Context, e *models.Expense, splits []*models.ExpenseSplit) error {
+		e.ID = "expense-1"
+		return nil
+	}
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	_, err := svc.CreateExpense(context.Background(), models.CreateExpenseInput{
+		FamilyID: "family-1", PaidBy: "member-1", Description: "Groceries", AmountCents: 4200,
+		ActorID: "member-1", ActorName: "Jamie",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "expense.created", logged.Verb)
+	assert.Equal(t, "expense", logged.SubjectType)
+	assert.Equal(t, "Groceries", logged.SubjectLabel)
+	assert.Equal(t, "Jamie", logged.ActorName)
+}
+
+func TestAttachReceiptSuccess(t *testing.T) {
+	expenseRepo := &mockrepository.MockExpenseRepository{}
+	documentRepo := &mockrepository.MockDocumentRepository{}
+	svc := service.NewExpenseService(expenseRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, documentRepo, &mockrepository.MockActivityRepository{})
+
+	expenseRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Expense, error) {
+		return &models.Expense{ID: id, FamilyID: "family-1"}, nil
+	}
+	documentRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Document, error) {
+		return &models.Document{ID: id, FamilyID: "family-1"}, nil
+	}
+	var setDocID *string
+	expenseRepo.SetDocumentIDFunc = func(ctx context.Context, expenseID string, documentID *string) error {
+		setDocID = documentID
+		return nil
+	}
+
+	expense, err := svc.AttachReceipt(context.Background(), "expense-1", "doc-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, setDocID)
+	assert.Equal(t, "doc-1", *setDocID)
+	require.NotNil(t, expense.DocumentID)
+	assert.Equal(t, "doc-1", *expense.DocumentID)
+}
+
+func TestAttachReceiptRejectsDocumentFromAnotherFamily(t *testing.T) {
+	expenseRepo := &mockrepository.MockExpenseRepository{}
+	documentRepo := &mockrepository.MockDocumentRepository{}
+	svc := service.NewExpenseService(expenseRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, documentRepo, &mockrepository.MockActivityRepository{})
+
+	expenseRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Expense, error) {
+		return &models.Expense{ID: id, FamilyID: "family-1"}, nil
+	}
+	documentRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Document, error) {
+		return &models.Document{ID: id, FamilyID: "other-family"}, nil
+	}
+
+	_, err := svc.AttachReceipt(context.Background(), "expense-1", "doc-1")
+
+	assert.ErrorIs(t, err, service.ErrInvalidInput)
+}
+
+func TestRemoveReceiptClearsDocumentID(t *testing.T) {
+	expenseRepo := &mockrepository.MockExpenseRepository{}
+	svc := service.NewExpenseService(expenseRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, &mockrepository.MockDocumentRepository{}, &mockrepository.MockActivityRepository{})
+
+	docID := "doc-1"
+	expenseRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Expense, error) {
+		return &models.Expense{ID: id, FamilyID: "family-1", DocumentID: &docID}, nil
+	}
+	var setDocID *string
+	setCalled := false
+	expenseRepo.SetDocumentIDFunc = func(ctx context.Context, expenseID string, documentID *string) error {
+		setCalled = true
+		setDocID = documentID
+		return nil
+	}
+
+	expense, err := svc.RemoveReceipt(context.Background(), "expense-1")
+
+	require.NoError(t, err)
+	assert.True(t, setCalled)
+	assert.Nil(t, setDocID)
+	assert.Nil(t, expense.DocumentID)
 }
 
 func TestCreateExpenseSuccess(t *testing.T) {

@@ -19,12 +19,13 @@ import { Link as RouterLink, Outlet, useLocation, useNavigate } from "react-rout
 import { useAuth } from "../context/AuthContext";
 
 const navItems = [
-  { label: "Dashboard", to: "/" },
+  { label: "Dashboard", to: "/app" },
   { label: "Family", to: "/family" },
   { label: "Parents", to: "/parents" },
   { label: "Tasks", to: "/tasks" },
   { label: "Expenses", to: "/expenses" },
   { label: "Documents", to: "/documents" },
+  { label: "Settings", to: "/settings" },
 ];
 
 export function Layout() {
@@ -54,7 +55,7 @@ export function Layout() {
           <Typography
             variant="h6"
             component={RouterLink}
-            to="/"
+            to="/app"
             sx={{ flexGrow: 1, color: "inherit", textDecoration: "none", fontWeight: 700 }}
           >
             Caretree

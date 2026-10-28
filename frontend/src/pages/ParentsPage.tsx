@@ -81,14 +81,20 @@ export function ParentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familiesLoading, families]);
 
-  useEffect(() => {
-    setCreateFamilyId((prev) => prev || families[0]?.id || "");
-  }, [families]);
-
   const isOwnerOf = useCallback(
     (familyId: string) => members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "owner"),
     [members, user?.id],
   );
+  const isViewerOf = useCallback(
+    (familyId: string) => members.some((m) => m.user_id === user?.id && m.family_id === familyId && m.role === "viewer"),
+    [members, user?.id],
+  );
+  const writableFamilies = families.filter((f) => !isViewerOf(f.id));
+
+  useEffect(() => {
+    setCreateFamilyId((prev) => prev || writableFamilies[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [families, members]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -167,11 +173,12 @@ export function ParentsPage() {
       )}
 
       <Stack spacing={2}>
+        {writableFamilies.length > 0 && (
         <Paper sx={{ p: 3 }}>
           <Stack direction="row" spacing={2} component="form" onSubmit={handleCreate} sx={{ flexWrap: "wrap" }}>
-            {families.length > 1 && (
+            {writableFamilies.length > 1 && (
               <Select size="small" value={createFamilyId} onChange={(e) => setCreateFamilyId(e.target.value)}>
-                {families.map((f) => (
+                {writableFamilies.map((f) => (
                   <MenuItem key={f.id} value={f.id}>
                     {f.name}
                   </MenuItem>
@@ -191,6 +198,7 @@ export function ParentsPage() {
             </Button>
           </Stack>
         </Paper>
+        )}
 
         {families.map((family) => {
           const familyParents = parents.filter((p) => p.family_id === family.id);
@@ -237,6 +245,7 @@ export function ParentsPage() {
                         <Collapse in={expanded} unmountOnExit>
                           <ParentKeyInfo
                             parent={parent}
+                            readOnly={isViewerOf(parent.family_id)}
                             onSaved={(updated) =>
                               setParents((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
                             }

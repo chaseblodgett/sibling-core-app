@@ -930,3 +930,25 @@ refactor target.
 Simple "404 / That page doesn't exist." + a "Back to Dashboard" button,
 rendered inside the normal authenticated `Layout` (nav bar stays usable)
 via a catch-all `<Route path="*">` as the last route.
+
+### Public marketing page (`pages/MarketingPage.tsx`)
+
+Lives at `/`, outside `ProtectedRoute` and outside the authenticated
+`Layout` — its own minimal header (wordmark + Log in / Sign up), not the
+app nav bar. Deliberately built on the same MUI + this spec's tokens as
+the authenticated app, not a separate visual system: this app's own
+`FamilyColor` pastel-tint palette (`utils/familyColor.ts`'s `PALETTE`,
+re-declared locally here rather than exported/imported, matching how
+other pages already duplicate small single-use constants) *is* the
+product's visual identity, so the sign-up moment shouldn't feel like
+landing in a different product. The hero's "product preview" card is a
+faithful mini-recreation of a real `FamilySection` + task row (same chip
+styling, same tinted header) rather than a generic mockup graphic.
+Content follows the `frontend-design` skill's anti-generic-tell
+checklist: every section names a specific, recognizable caregiving
+moment instead of an abstract feature label, each one mapping to an
+actually-shipped feature; the "how it works" steps are numbered because
+they're a genuine sequence, the four scenario cards are not (2×2 grid,
+no numbering) because they aren't. The primary CTA is `useAuth()`-aware
+— "Sign up free" when logged out, "Go to Dashboard" when already signed
+in — in the header and every CTA button on the page, not just once.

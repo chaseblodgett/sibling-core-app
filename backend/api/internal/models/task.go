@@ -57,6 +57,10 @@ type CreateTaskInput struct {
 	CreatedBy      string
 	DueDate        *time.Time
 	RecurrenceRule string
+	// ActorName is CreatedBy's display name, for the activity-feed entry
+	// this create produces — snapshotted at write time rather than
+	// resolved by a join later.
+	ActorName string
 }
 
 // UpdateTaskInput carries the fields that may be updated on a task.
@@ -68,4 +72,9 @@ type UpdateTaskInput struct {
 	ParentID       *string
 	DueDate        *time.Time
 	RecurrenceRule *string
+	// ActorID/ActorName identify who's making this update, for the
+	// activity-feed entry a completion produces. Unlike Create, Update
+	// has no existing "who did this" field to reuse.
+	ActorID   string
+	ActorName string
 }

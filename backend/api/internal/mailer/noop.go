@@ -20,3 +20,9 @@ func (m *noopMailer) SendFamilyInvite(_ context.Context, email FamilyInviteEmail
 		email.To, email.FamilyName, email.InviteCode)
 	return nil
 }
+
+func (m *noopMailer) SendTaskAssigned(_ context.Context, email TaskAssignedEmail) error {
+	log.Printf("mailer: RESEND_API_KEY not set, skipping task-assigned email to %s (task %q, by %s)",
+		email.To, email.TaskTitle, email.AssignedBy)
+	return nil
+}

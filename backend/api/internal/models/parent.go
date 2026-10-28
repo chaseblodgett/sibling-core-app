@@ -55,6 +55,12 @@ type CreateParentInput struct {
 	Name      string
 	Relation  string
 	CreatedBy string
+	// ActorID/ActorName identify who's adding this parent, for the
+	// activity-feed entry this create produces. CreatedBy above is a
+	// user id (not a member id, unlike Task/Expense/Document), so it
+	// can't double as ActorID the way CreateTaskInput.CreatedBy does.
+	ActorID   string
+	ActorName string
 }
 
 // UpdateParentInput carries the fields that may be updated on a parent.

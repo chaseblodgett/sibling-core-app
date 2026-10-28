@@ -11,4 +11,6 @@ export const familyApi = {
   listMembers: (familyId: string) => apiClient.get<Member[]>(`/families/${familyId}/members`),
   removeMember: (familyId: string, memberId: string) =>
     apiClient.delete<void>(`/families/${familyId}/members/${memberId}`),
+  updateMemberRole: (familyId: string, memberId: string, role: Member["role"]) =>
+    apiClient.patch<Member>(`/families/${familyId}/members/${memberId}/role`, { role }),
 };

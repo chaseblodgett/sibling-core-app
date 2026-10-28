@@ -44,9 +44,13 @@ func (h *ParentHandler) CreateParent(c *echo.Context) error {
 	user := middleware.CurrentUser(c)
 	familyID := c.Param("familyId")
 
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, familyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, familyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	var req models.CreateParentRequest
@@ -59,6 +63,8 @@ func (h *ParentHandler) CreateParent(c *echo.Context) error {
 		Name:      req.Name,
 		Relation:  req.Relation,
 		CreatedBy: user.ID,
+		ActorID:   requester.ID,
+		ActorName: memberDisplayName(requester),
 	})
 	if err != nil {
 		status, msg := mapParentError(err)
@@ -114,9 +120,13 @@ func (h *ParentHandler) UpdateParent(c *echo.Context) error {
 		status, msg := mapParentError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
 	}
-	if _, err := h.familyService.RequireMembership(ctx, user.ID, parent.FamilyID); err != nil {
+	requester, err := h.familyService.RequireMembership(ctx, user.ID, parent.FamilyID)
+	if err != nil {
 		status, msg := mapFamilyError(err)
 		return c.JSON(status, models.ErrorResponse{Message: msg})
+	}
+	if err := requireNotViewer(requester); err != nil {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: err.Error()})
 	}
 
 	var req models.UpdateParentRequest

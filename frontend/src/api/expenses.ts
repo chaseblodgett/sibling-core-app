@@ -25,6 +25,9 @@ export const expensesApi = {
     apiClient.post<Expense>(`/families/${familyId}/expenses`, payload),
   get: (id: string) => apiClient.get<Expense>(`/expenses/${id}`),
   delete: (id: string) => apiClient.delete<void>(`/expenses/${id}`),
+  attachReceipt: (expenseId: string, documentId: string) =>
+    apiClient.post<Expense>(`/expenses/${expenseId}/receipt`, { document_id: documentId }),
+  removeReceipt: (expenseId: string) => apiClient.delete<Expense>(`/expenses/${expenseId}/receipt`),
   listSplits: (expenseId: string) => apiClient.get<ExpenseSplit[]>(`/expenses/${expenseId}/splits`),
   settleSplit: (splitId: string) => apiClient.post<ExpenseSplit>(`/expenses/splits/${splitId}/settle`),
   balances: (familyId: string) => apiClient.get<Balance[]>(`/families/${familyId}/balances`),

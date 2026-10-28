@@ -28,7 +28,8 @@ func newTestFamilyServiceWithMailer(t *testing.T) (service.FamilyService, *mockr
 	memberRepo := &mockrepository.MockMemberRepository{}
 	userRepo := &mockrepository.MockUserRepository{}
 	mail := &mockmailer.MockMailer{}
-	return service.NewFamilyService(familyRepo, memberRepo, userRepo, mail), familyRepo, memberRepo, userRepo, mail
+	activityRepo := &mockrepository.MockActivityRepository{}
+	return service.NewFamilyService(familyRepo, memberRepo, userRepo, mail, activityRepo), familyRepo, memberRepo, userRepo, mail
 }
 
 func TestCreateFamilySuccess(t *testing.T) {
@@ -143,6 +144,46 @@ func TestJoinFamilySuccess(t *testing.T) {
 	require.NotNil(t, createdMember)
 	assert.Equal(t, "member", createdMember.Role)
 	assert.Equal(t, "invite-1", acceptedInviteID)
+}
+
+func TestJoinFamilyLogsActivity(t *testing.T) {
+	familyRepo := &mockrepository.MockFamilyRepository{}
+	memberRepo := &mockrepository.MockMemberRepository{}
+	userRepo := &mockrepository.MockUserRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewFamilyService(familyRepo, memberRepo, userRepo, &mockmailer.MockMailer{}, activityRepo)
+	ctx := context.Background()
+
+	family := &models.Family{ID: "family-1", InviteCode: "ABCD2345"}
+	familyRepo.GetByInviteCodeFunc = func(ctx context.Context, code string) (*models.Family, error) { return family, nil }
+	memberRepo.GetByUserAndFamilyFunc = func(ctx context.Context, userID, familyID string) (*models.Member, error) {
+		return nil, repository.ErrMemberNotFound
+	}
+	userRepo.FindByIDFunc = func(ctx context.Context, id string) (*models.User, error) {
+		return &models.User{ID: "user-2", Email: "sibling@example.com", Name: "Sibling"}, nil
+	}
+	memberRepo.CreateFunc = func(ctx context.Context, member *models.Member) error {
+		member.ID = "member-2"
+		return nil
+	}
+	familyRepo.ListInvitesByFamilyFunc = func(ctx context.Context, familyID string) ([]*models.FamilyInvite, error) {
+		return nil, nil
+	}
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	_, err := svc.JoinFamily(ctx, "abcd2345", "user-2")
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "family-1", logged.FamilyID)
+	assert.Equal(t, "member.joined", logged.Verb)
+	assert.Equal(t, "Sibling", logged.ActorName)
+	require.NotNil(t, logged.ActorID)
+	assert.Equal(t, "member-2", *logged.ActorID)
 }
 
 func TestJoinFamilyAlreadyMemberIsIdempotent(t *testing.T) {
@@ -279,6 +320,97 @@ func TestRemoveMemberRejectsCrossFamily(t *testing.T) {
 
 	assert.ErrorIs(t, err, repository.ErrMemberNotFound)
 	assert.False(t, deleteCalled)
+}
+
+func TestUpdateMemberRoleSuccess(t *testing.T) {
+	svc, _, memberRepo, _ := newTestFamilyService(t)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", Role: "member"}, nil
+	}
+	var setRole string
+	memberRepo.SetRoleFunc = func(ctx context.Context, id, role string) error {
+		setRole = role
+		return nil
+	}
+
+	member, err := svc.UpdateMemberRole(context.Background(), "family-1", "member-1", "viewer")
+
+	require.NoError(t, err)
+	assert.Equal(t, "viewer", setRole)
+	assert.Equal(t, "viewer", member.Role)
+}
+
+func TestUpdateMemberRoleRejectsInvalidRole(t *testing.T) {
+	svc, _, memberRepo, _ := newTestFamilyService(t)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", Role: "member"}, nil
+	}
+
+	_, err := svc.UpdateMemberRole(context.Background(), "family-1", "member-1", "admin")
+
+	assert.ErrorIs(t, err, service.ErrInvalidInput)
+}
+
+func TestUpdateMemberRoleRejectsCrossFamily(t *testing.T) {
+	svc, _, memberRepo, _ := newTestFamilyService(t)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "other-family", Role: "member"}, nil
+	}
+
+	_, err := svc.UpdateMemberRole(context.Background(), "family-1", "member-1", "viewer")
+
+	assert.ErrorIs(t, err, repository.ErrMemberNotFound)
+}
+
+func TestUpdateMemberRoleRejectsDemotingLastOwner(t *testing.T) {
+	svc, _, memberRepo, _ := newTestFamilyService(t)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", Role: "owner"}, nil
+	}
+	memberRepo.ListByFamilyFunc = func(ctx context.Context, familyID string) ([]*models.Member, error) {
+		return []*models.Member{
+			{ID: "member-1", FamilyID: familyID, Role: "owner"},
+			{ID: "member-2", FamilyID: familyID, Role: "member"},
+		}, nil
+	}
+	setRoleCalled := false
+	memberRepo.SetRoleFunc = func(ctx context.Context, id, role string) error {
+		setRoleCalled = true
+		return nil
+	}
+
+	_, err := svc.UpdateMemberRole(context.Background(), "family-1", "member-1", "member")
+
+	assert.ErrorIs(t, err, service.ErrInvalidInput)
+	assert.False(t, setRoleCalled)
+}
+
+func TestUpdateMemberRoleAllowsDemotingOwnerWithAnotherOwnerPresent(t *testing.T) {
+	svc, _, memberRepo, _ := newTestFamilyService(t)
+
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", Role: "owner"}, nil
+	}
+	memberRepo.ListByFamilyFunc = func(ctx context.Context, familyID string) ([]*models.Member, error) {
+		return []*models.Member{
+			{ID: "member-1", FamilyID: familyID, Role: "owner"},
+			{ID: "member-2", FamilyID: familyID, Role: "owner"},
+		}, nil
+	}
+	setRoleCalled := false
+	memberRepo.SetRoleFunc = func(ctx context.Context, id, role string) error {
+		setRoleCalled = true
+		return nil
+	}
+
+	_, err := svc.UpdateMemberRole(context.Background(), "family-1", "member-1", "member")
+
+	require.NoError(t, err)
+	assert.True(t, setRoleCalled)
 }
 
 func TestRequireMembership(t *testing.T) {

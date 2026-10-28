@@ -13,7 +13,17 @@ type FamilyInviteEmail struct {
 	InviteCode  string
 }
 
+// TaskAssignedEmail carries everything needed to render a
+// task-assignment notification.
+type TaskAssignedEmail struct {
+	To           string
+	AssigneeName string
+	TaskTitle    string
+	AssignedBy   string
+}
+
 // Mailer sends transactional emails for the app.
 type Mailer interface {
 	SendFamilyInvite(ctx context.Context, email FamilyInviteEmail) error
+	SendTaskAssigned(ctx context.Context, email TaskAssignedEmail) error
 }

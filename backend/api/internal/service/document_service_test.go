@@ -22,7 +22,43 @@ func newTestDocumentService(t *testing.T) (service.DocumentService, *mockreposit
 	documentRepo := &mockrepository.MockDocumentRepository{}
 	parentRepo := &mockrepository.MockParentRepository{}
 	store := &mockstorage.MockStorage{}
-	return service.NewDocumentService(documentRepo, parentRepo, store), documentRepo, parentRepo, store
+	activityRepo := &mockrepository.MockActivityRepository{}
+	return service.NewDocumentService(documentRepo, parentRepo, store, activityRepo), documentRepo, parentRepo, store
+}
+
+func TestUploadDocumentLogsActivity(t *testing.T) {
+	documentRepo := &mockrepository.MockDocumentRepository{}
+	store := &mockstorage.MockStorage{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewDocumentService(documentRepo, &mockrepository.MockParentRepository{}, store, activityRepo)
+
+	store.UploadFunc = func(ctx context.Context, path, contentType string, content io.Reader) error { return nil }
+	documentRepo.CreateFunc = func(ctx context.Context, d *models.Document) error {
+		d.ID = "doc-1"
+		return nil
+	}
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	_, err := svc.UploadDocument(context.Background(), models.UploadDocumentInput{
+		FamilyID:    "family-1",
+		UploadedBy:  "member-1",
+		FileName:    "Insurance card.pdf",
+		ContentType: "application/pdf",
+		SizeBytes:   13,
+		Content:     strings.NewReader("file contents"),
+		ActorName:   "Sarah",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "document.uploaded", logged.Verb)
+	assert.Equal(t, "document", logged.SubjectType)
+	assert.Equal(t, "Insurance card.pdf", logged.SubjectLabel)
+	assert.Equal(t, "Sarah", logged.ActorName)
 }
 
 func TestUploadDocumentSuccess(t *testing.T) {

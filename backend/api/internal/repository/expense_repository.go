@@ -31,6 +31,9 @@ type ExpenseRepository interface {
 	// those tied to a specific parent (nil parentID returns all of them).
 	ListByFamily(ctx context.Context, familyID string, parentID *string) ([]*models.Expense, error)
 	Delete(ctx context.Context, id string) error
+	// SetDocumentID attaches (or, with a nil documentID, detaches) a
+	// receipt document to an expense.
+	SetDocumentID(ctx context.Context, expenseID string, documentID *string) error
 
 	ListSplitsByExpense(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error)
 	// ListSplitsByFamily returns every split across every expense in a
@@ -152,6 +155,25 @@ func (r *postgresExpenseRepository) Delete(ctx context.Context, id string) error
 	return nil
 }
 
+func (r *postgresExpenseRepository) SetDocumentID(ctx context.Context, expenseID string, documentID *string) error {
+	query, args, err := dialect.Update(expensesTable).
+		Set(goqu.Record{"document_id": documentID, "updated_at": goqu.L("now()")}).
+		Where(goqu.Ex{"id": expenseID}).
+		Prepared(true).
+		ToSQL()
+	if err != nil {
+		return err
+	}
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrExpenseNotFound
+	}
+	return nil
+}
+
 func (r *postgresExpenseRepository) ListSplitsByExpense(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error) {
 	query, args, err := splitSelectDataset().Where(goqu.Ex{"expense_id": expenseID}).Prepared(true).ToSQL()
 	if err != nil {
@@ -208,11 +230,11 @@ func (r *postgresExpenseRepository) SetSplitSettled(ctx context.Context, splitID
 
 func expenseSelectDataset() *goqu.SelectDataset {
 	return dialect.From(expensesTable).
-		Select("id", "family_id", "paid_by", "description", "amount_cents", "currency", "category", "parent_id", "incurred_at", "created_at", "updated_at")
+		Select("id", "family_id", "paid_by", "description", "amount_cents", "currency", "category", "parent_id", "document_id", "incurred_at", "created_at", "updated_at")
 }
 
 func scanExpenseRow(row taskScanner, e *models.Expense) error {
-	return row.Scan(&e.ID, &e.FamilyID, &e.PaidBy, &e.Description, &e.AmountCents, &e.Currency, &e.Category, &e.ParentID, &e.IncurredAt, &e.CreatedAt, &e.UpdatedAt)
+	return row.Scan(&e.ID, &e.FamilyID, &e.PaidBy, &e.Description, &e.AmountCents, &e.Currency, &e.Category, &e.ParentID, &e.DocumentID, &e.IncurredAt, &e.CreatedAt, &e.UpdatedAt)
 }
 
 func scanExpense(row pgx.Row) (*models.Expense, error) {

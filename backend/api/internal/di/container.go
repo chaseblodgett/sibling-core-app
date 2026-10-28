@@ -47,6 +47,8 @@ func Build(ctx context.Context) (*Container, error) {
 	taskRepo := repository.NewTaskRepository(db)
 	expenseRepo := repository.NewExpenseRepository(db)
 	documentRepo := repository.NewDocumentRepository(db)
+	activityRepo := repository.NewActivityRepository(db)
+	notificationPrefsRepo := repository.NewNotificationPreferencesRepository(db)
 
 	var mailService mailer.Mailer
 	if cfg.ResendAPIKey != "" {
@@ -57,21 +59,29 @@ func Build(ctx context.Context) (*Container, error) {
 
 	googleVerifier := googleauth.NewVerifier(cfg.GoogleClientID)
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, googleVerifier)
-	familyService := service.NewFamilyService(familyRepo, memberRepo, userRepo, mailService)
-	parentService := service.NewParentService(parentRepo)
-	taskService := service.NewTaskService(taskRepo, memberRepo, parentRepo)
-	expenseService := service.NewExpenseService(expenseRepo, memberRepo, parentRepo)
+	familyService := service.NewFamilyService(familyRepo, memberRepo, userRepo, mailService, activityRepo)
+	parentService := service.NewParentService(parentRepo, activityRepo)
+	taskService := service.NewTaskService(taskRepo, memberRepo, parentRepo, activityRepo, notificationPrefsRepo, mailService)
+	expenseService := service.NewExpenseService(expenseRepo, memberRepo, parentRepo, documentRepo, activityRepo)
 	fileStorage := storage.NewSupabaseStorage(cfg.SupabaseURL, cfg.SupabaseServiceKey)
-	documentService := service.NewDocumentService(documentRepo, parentRepo, fileStorage)
+	documentService := service.NewDocumentService(documentRepo, parentRepo, fileStorage, activityRepo)
+	activityService := service.NewActivityService(activityRepo)
+	contributionService := service.NewContributionService(memberRepo, expenseRepo, activityRepo)
+	exportService := service.NewExportService(expenseRepo, taskRepo, memberRepo, parentRepo)
+	notificationPrefsService := service.NewNotificationPreferencesService(notificationPrefsRepo)
 
 	// Handlers
 	handlers := &handler.Handlers{
-		Auth:     handler.NewAuthHandler(authService),
-		Family:   handler.NewFamilyHandler(familyService, authService),
-		Parent:   handler.NewParentHandler(parentService, familyService, authService),
-		Task:     handler.NewTaskHandler(taskService, familyService, authService),
-		Expense:  handler.NewExpenseHandler(expenseService, familyService, authService),
-		Document: handler.NewDocumentHandler(documentService, familyService, authService),
+		Auth:                    handler.NewAuthHandler(authService),
+		Family:                  handler.NewFamilyHandler(familyService, authService),
+		Parent:                  handler.NewParentHandler(parentService, familyService, authService),
+		Task:                    handler.NewTaskHandler(taskService, familyService, authService),
+		Expense:                 handler.NewExpenseHandler(expenseService, familyService, authService),
+		Document:                handler.NewDocumentHandler(documentService, familyService, authService),
+		Activity:                handler.NewActivityHandler(activityService, familyService, authService),
+		Contribution:            handler.NewContributionHandler(contributionService, familyService, authService),
+		Export:                  handler.NewExportHandler(exportService, familyService, authService),
+		NotificationPreferences: handler.NewNotificationPreferencesHandler(notificationPrefsService, authService),
 	}
 
 	return &Container{

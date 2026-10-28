@@ -30,7 +30,7 @@ export function SignupPage() {
     setServerError(null);
     try {
       await loginWithGoogle(idToken);
-      navigate("/", { replace: true });
+      navigate("/app", { replace: true });
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : "Google sign-in failed. Try again.");
     }
@@ -61,7 +61,7 @@ export function SignupPage() {
     setSubmitting(true);
     try {
       await signUp(email, password, name);
-      navigate("/", { replace: true });
+      navigate("/app", { replace: true });
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {

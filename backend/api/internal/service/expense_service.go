@@ -18,6 +18,12 @@ type ExpenseService interface {
 	ListExpenses(ctx context.Context, familyID string, parentID *string) ([]*models.Expense, error)
 	DeleteExpense(ctx context.Context, id string) error
 
+	// AttachReceipt links a document (which must belong to the expense's
+	// family) to the expense as its receipt.
+	AttachReceipt(ctx context.Context, expenseID, documentID string) (*models.Expense, error)
+	// RemoveReceipt unlinks whatever receipt is attached, if any.
+	RemoveReceipt(ctx context.Context, expenseID string) (*models.Expense, error)
+
 	ListSplits(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error)
 	// GetSplit looks up a single split by id — used to resolve its family
 	// (via its expense) for authorization before SettleSplit mutates it.
@@ -30,14 +36,16 @@ type ExpenseService interface {
 }
 
 type expenseService struct {
-	expenseRepo repository.ExpenseRepository
-	memberRepo  repository.MemberRepository
-	parentRepo  repository.ParentRepository
+	expenseRepo  repository.ExpenseRepository
+	memberRepo   repository.MemberRepository
+	parentRepo   repository.ParentRepository
+	documentRepo repository.DocumentRepository
+	activityRepo repository.ActivityRepository
 }
 
 // NewExpenseService constructs an ExpenseService.
-func NewExpenseService(expenseRepo repository.ExpenseRepository, memberRepo repository.MemberRepository, parentRepo repository.ParentRepository) ExpenseService {
-	return &expenseService{expenseRepo: expenseRepo, memberRepo: memberRepo, parentRepo: parentRepo}
+func NewExpenseService(expenseRepo repository.ExpenseRepository, memberRepo repository.MemberRepository, parentRepo repository.ParentRepository, documentRepo repository.DocumentRepository, activityRepo repository.ActivityRepository) ExpenseService {
+	return &expenseService{expenseRepo: expenseRepo, memberRepo: memberRepo, parentRepo: parentRepo, documentRepo: documentRepo, activityRepo: activityRepo}
 }
 
 func (s *expenseService) CreateExpense(ctx context.Context, input models.CreateExpenseInput) (*models.Expense, error) {
@@ -99,6 +107,8 @@ func (s *expenseService) CreateExpense(ctx context.Context, input models.CreateE
 	if err := s.expenseRepo.Create(ctx, expense, splits); err != nil {
 		return nil, err
 	}
+	actorID := input.ActorID
+	logActivity(ctx, s.activityRepo, expense.FamilyID, &actorID, input.ActorName, "expense.created", "expense", &expense.ID, expense.Description)
 	return expense, nil
 }
 
@@ -112,6 +122,33 @@ func (s *expenseService) ListExpenses(ctx context.Context, familyID string, pare
 
 func (s *expenseService) DeleteExpense(ctx context.Context, id string) error {
 	return s.expenseRepo.Delete(ctx, id)
+}
+
+func (s *expenseService) AttachReceipt(ctx context.Context, expenseID, documentID string) (*models.Expense, error) {
+	expense, err := s.expenseRepo.GetByID(ctx, expenseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireDocumentInFamily(ctx, s.documentRepo, documentID, expense.FamilyID); err != nil {
+		return nil, err
+	}
+	if err := s.expenseRepo.SetDocumentID(ctx, expenseID, &documentID); err != nil {
+		return nil, err
+	}
+	expense.DocumentID = &documentID
+	return expense, nil
+}
+
+func (s *expenseService) RemoveReceipt(ctx context.Context, expenseID string) (*models.Expense, error) {
+	expense, err := s.expenseRepo.GetByID(ctx, expenseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.expenseRepo.SetDocumentID(ctx, expenseID, nil); err != nil {
+		return nil, err
+	}
+	expense.DocumentID = nil
+	return expense, nil
 }
 
 func (s *expenseService) ListSplits(ctx context.Context, expenseID string) ([]*models.ExpenseSplit, error) {

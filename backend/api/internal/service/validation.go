@@ -39,3 +39,18 @@ func requireParentInFamily(ctx context.Context, parentRepo repository.ParentRepo
 	}
 	return nil
 }
+
+// requireDocumentInFamily checks that documentID names a document of familyID.
+func requireDocumentInFamily(ctx context.Context, documentRepo repository.DocumentRepository, documentID, familyID string) error {
+	doc, err := documentRepo.GetByID(ctx, documentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrDocumentNotFound) {
+			return fmt.Errorf("%w: document does not belong to this family", ErrInvalidInput)
+		}
+		return err
+	}
+	if doc.FamilyID != familyID {
+		return fmt.Errorf("%w: document does not belong to this family", ErrInvalidInput)
+	}
+	return nil
+}

@@ -8,9 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"sibling-core/api/internal/mailer"
 	"sibling-core/api/internal/models"
 	"sibling-core/api/internal/repository"
 	"sibling-core/api/internal/service"
+	mockmailer "sibling-core/api/test/mock/mock_mailer"
 	mockrepository "sibling-core/api/test/mock/mock_repository"
 )
 
@@ -19,7 +21,8 @@ func newTestTaskService(t *testing.T) (service.TaskService, *mockrepository.Mock
 	taskRepo := &mockrepository.MockTaskRepository{}
 	memberRepo := &mockrepository.MockMemberRepository{}
 	parentRepo := &mockrepository.MockParentRepository{}
-	return service.NewTaskService(taskRepo, memberRepo, parentRepo), taskRepo, memberRepo, parentRepo
+	activityRepo := &mockrepository.MockActivityRepository{}
+	return service.NewTaskService(taskRepo, memberRepo, parentRepo, activityRepo, &mockrepository.MockNotificationPreferencesRepository{}, &mockmailer.MockMailer{}), taskRepo, memberRepo, parentRepo
 }
 
 func TestCreateTaskSuccess(t *testing.T) {
@@ -65,6 +68,87 @@ func TestCreateTaskWithDueDate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, created.DueDate)
 	assert.True(t, dueDate.Equal(*created.DueDate))
+}
+
+func TestCreateTaskLogsActivity(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewTaskService(taskRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, activityRepo, &mockrepository.MockNotificationPreferencesRepository{}, &mockmailer.MockMailer{})
+
+	taskRepo.CreateFunc = func(ctx context.Context, task *models.Task) error {
+		task.ID = "task-1"
+		return nil
+	}
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	_, err := svc.CreateTask(context.Background(), models.CreateTaskInput{
+		FamilyID: "family-1", Title: "Refill prescriptions", CreatedBy: "member-1", ActorName: "Jamie",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "family-1", logged.FamilyID)
+	assert.Equal(t, "task.created", logged.Verb)
+	assert.Equal(t, "task", logged.SubjectType)
+	require.NotNil(t, logged.SubjectID)
+	assert.Equal(t, "task-1", *logged.SubjectID)
+	assert.Equal(t, "Refill prescriptions", logged.SubjectLabel)
+	assert.Equal(t, "Jamie", logged.ActorName)
+	require.NotNil(t, logged.ActorID)
+	assert.Equal(t, "member-1", *logged.ActorID)
+}
+
+func TestUpdateTaskCompletingLogsActivity(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewTaskService(taskRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, activityRepo, &mockrepository.MockNotificationPreferencesRepository{}, &mockmailer.MockMailer{})
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit", Status: "todo"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	done := "done"
+	_, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{
+		Status: &done, ActorID: "member-2", ActorName: "Sarah",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "task.completed", logged.Verb)
+	assert.Equal(t, "Doctor visit", logged.SubjectLabel)
+	assert.Equal(t, "Sarah", logged.ActorName)
+}
+
+func TestUpdateTaskNotCompletingDoesNotLogActivity(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewTaskService(taskRepo, &mockrepository.MockMemberRepository{}, &mockrepository.MockParentRepository{}, activityRepo, &mockrepository.MockNotificationPreferencesRepository{}, &mockmailer.MockMailer{})
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit", Status: "todo"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	logged := false
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = true
+		return nil
+	}
+
+	inProgress := "in_progress"
+	_, err := svc.UpdateTask(context.Background(), "task-1", models.UpdateTaskInput{Status: &inProgress})
+
+	require.NoError(t, err)
+	assert.False(t, logged, "only a transition to done should log activity")
 }
 
 func TestCreateTaskBlankTitle(t *testing.T) {
@@ -318,7 +402,7 @@ func TestAssignTaskRejectsMemberFromAnotherFamily(t *testing.T) {
 		return &models.Member{ID: id, FamilyID: "other-family"}, nil
 	}
 
-	_, err := svc.AssignTask(context.Background(), "task-1", "member-1")
+	_, err := svc.AssignTask(context.Background(), "task-1", "member-1", "actor-1", "Actor")
 
 	assert.ErrorIs(t, err, service.ErrInvalidInput)
 }
@@ -338,12 +422,95 @@ func TestAssignTaskSuccess(t *testing.T) {
 		return nil
 	}
 
-	task, err := svc.AssignTask(context.Background(), "task-1", "member-1")
+	task, err := svc.AssignTask(context.Background(), "task-1", "member-1", "actor-1", "Actor")
 
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	require.NotNil(t, task.AssigneeID)
 	assert.Equal(t, "member-1", *task.AssigneeID)
+}
+
+func TestAssignTaskSendsEmailOnChange(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	memberRepo := &mockrepository.MockMemberRepository{}
+	notificationPrefsRepo := &mockrepository.MockNotificationPreferencesRepository{}
+	mail := &mockmailer.MockMailer{}
+	svc := service.NewTaskService(taskRepo, memberRepo, &mockrepository.MockParentRepository{}, &mockrepository.MockActivityRepository{}, notificationPrefsRepo, mail)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit"}, nil
+	}
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", UserID: "user-2", Email: "sarah@example.com", FullName: "Sarah"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	var sent *mailer.TaskAssignedEmail
+	mail.SendTaskAssignedFunc = func(ctx context.Context, email mailer.TaskAssignedEmail) error {
+		sent = &email
+		return nil
+	}
+
+	_, err := svc.AssignTask(context.Background(), "task-1", "member-2", "member-1", "Jamie")
+
+	require.NoError(t, err)
+	require.NotNil(t, sent)
+	assert.Equal(t, "sarah@example.com", sent.To)
+	assert.Equal(t, "Doctor visit", sent.TaskTitle)
+	assert.Equal(t, "Jamie", sent.AssignedBy)
+}
+
+func TestAssignTaskDoesNotEmailSelfAssignment(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	memberRepo := &mockrepository.MockMemberRepository{}
+	mail := &mockmailer.MockMailer{}
+	svc := service.NewTaskService(taskRepo, memberRepo, &mockrepository.MockParentRepository{}, &mockrepository.MockActivityRepository{}, &mockrepository.MockNotificationPreferencesRepository{}, mail)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit"}, nil
+	}
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	sent := false
+	mail.SendTaskAssignedFunc = func(ctx context.Context, email mailer.TaskAssignedEmail) error {
+		sent = true
+		return nil
+	}
+
+	_, err := svc.AssignTask(context.Background(), "task-1", "member-1", "member-1", "Jamie")
+
+	require.NoError(t, err)
+	assert.False(t, sent, "assigning a task to yourself shouldn't send yourself an email")
+}
+
+func TestAssignTaskRespectsOptOut(t *testing.T) {
+	taskRepo := &mockrepository.MockTaskRepository{}
+	memberRepo := &mockrepository.MockMemberRepository{}
+	notificationPrefsRepo := &mockrepository.MockNotificationPreferencesRepository{}
+	mail := &mockmailer.MockMailer{}
+	svc := service.NewTaskService(taskRepo, memberRepo, &mockrepository.MockParentRepository{}, &mockrepository.MockActivityRepository{}, notificationPrefsRepo, mail)
+
+	taskRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Task, error) {
+		return &models.Task{ID: id, FamilyID: "family-1", Title: "Doctor visit"}, nil
+	}
+	memberRepo.GetByIDFunc = func(ctx context.Context, id string) (*models.Member, error) {
+		return &models.Member{ID: id, FamilyID: "family-1", UserID: "user-2", Email: "sarah@example.com"}, nil
+	}
+	taskRepo.UpdateFunc = func(ctx context.Context, task *models.Task) error { return nil }
+	notificationPrefsRepo.GetByUserIDFunc = func(ctx context.Context, userID string) (*models.NotificationPreferences, error) {
+		return &models.NotificationPreferences{UserID: userID, TaskAssignedEmail: false}, nil
+	}
+	sent := false
+	mail.SendTaskAssignedFunc = func(ctx context.Context, email mailer.TaskAssignedEmail) error {
+		sent = true
+		return nil
+	}
+
+	_, err := svc.AssignTask(context.Background(), "task-1", "member-2", "member-1", "Jamie")
+
+	require.NoError(t, err)
+	assert.False(t, sent, "opted-out assignee shouldn't get an email")
 }
 
 func TestListTasksFiltersByParent(t *testing.T) {

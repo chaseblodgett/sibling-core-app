@@ -37,6 +37,10 @@ type FamilyService interface {
 	InviteMember(ctx context.Context, input models.InviteMemberInput) (*models.FamilyInvite, error)
 	ListMembers(ctx context.Context, familyID string) ([]*models.Member, error)
 	RemoveMember(ctx context.Context, familyID, memberID string) error
+	// UpdateMemberRole changes a member's role within familyID. Rejects
+	// demoting the family's only remaining owner — a family must always
+	// have at least one.
+	UpdateMemberRole(ctx context.Context, familyID, memberID, role string) (*models.Member, error)
 
 	// ListFamiliesForUser returns every family a user belongs to, letting a
 	// logged-in user discover "my family" without already knowing its id.
@@ -48,15 +52,16 @@ type FamilyService interface {
 }
 
 type familyService struct {
-	familyRepo repository.FamilyRepository
-	memberRepo repository.MemberRepository
-	userRepo   repository.UserRepository
-	mailer     mailer.Mailer
+	familyRepo   repository.FamilyRepository
+	memberRepo   repository.MemberRepository
+	userRepo     repository.UserRepository
+	mailer       mailer.Mailer
+	activityRepo repository.ActivityRepository
 }
 
 // NewFamilyService constructs a FamilyService.
-func NewFamilyService(familyRepo repository.FamilyRepository, memberRepo repository.MemberRepository, userRepo repository.UserRepository, mailService mailer.Mailer) FamilyService {
-	return &familyService{familyRepo: familyRepo, memberRepo: memberRepo, userRepo: userRepo, mailer: mailService}
+func NewFamilyService(familyRepo repository.FamilyRepository, memberRepo repository.MemberRepository, userRepo repository.UserRepository, mailService mailer.Mailer, activityRepo repository.ActivityRepository) FamilyService {
+	return &familyService{familyRepo: familyRepo, memberRepo: memberRepo, userRepo: userRepo, mailer: mailService, activityRepo: activityRepo}
 }
 
 func (s *familyService) CreateFamily(ctx context.Context, input models.CreateFamilyInput) (*models.Family, error) {
@@ -142,6 +147,12 @@ func (s *familyService) JoinFamily(ctx context.Context, inviteCode, userID strin
 
 	s.acceptMatchingInvite(ctx, family.ID, user.Email)
 
+	actorName := member.FullName
+	if actorName == "" {
+		actorName = member.Email
+	}
+	logActivity(ctx, s.activityRepo, family.ID, &member.ID, actorName, "member.joined", "member", &member.ID, "")
+
 	return family, nil
 }
 
@@ -223,6 +234,45 @@ func (s *familyService) RemoveMember(ctx context.Context, familyID, memberID str
 		return repository.ErrMemberNotFound
 	}
 	return s.memberRepo.Delete(ctx, memberID)
+}
+
+var validMemberRoles = map[string]bool{"owner": true, "member": true, "viewer": true}
+
+func (s *familyService) UpdateMemberRole(ctx context.Context, familyID, memberID, role string) (*models.Member, error) {
+	if !validMemberRoles[role] {
+		return nil, fmt.Errorf("%w: role must be owner, member, or viewer", ErrInvalidInput)
+	}
+
+	member, err := s.memberRepo.GetByID(ctx, memberID)
+	if err != nil {
+		return nil, err
+	}
+	if member.FamilyID != familyID {
+		return nil, repository.ErrMemberNotFound
+	}
+
+	if member.Role == "owner" && role != "owner" {
+		members, err := s.memberRepo.ListByFamily(ctx, familyID)
+		if err != nil {
+			return nil, err
+		}
+		otherOwner := false
+		for _, m := range members {
+			if m.ID != memberID && m.Role == "owner" {
+				otherOwner = true
+				break
+			}
+		}
+		if !otherOwner {
+			return nil, fmt.Errorf("%w: a family must have at least one owner", ErrInvalidInput)
+		}
+	}
+
+	if err := s.memberRepo.SetRole(ctx, memberID, role); err != nil {
+		return nil, err
+	}
+	member.Role = role
+	return member, nil
 }
 
 func (s *familyService) ListFamiliesForUser(ctx context.Context, userID string) ([]*models.Family, error) {

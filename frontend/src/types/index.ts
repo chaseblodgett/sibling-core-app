@@ -26,7 +26,7 @@ export interface Member {
   user_id: string;
   email: string;
   full_name: string;
-  role: "owner" | "member";
+  role: "owner" | "member" | "viewer";
   joined_at: string;
 }
 
@@ -86,6 +86,7 @@ export interface Expense {
   currency: string;
   category: string;
   parent_id?: string;
+  document_id?: string;
   incurred_at: string;
   created_at: string;
   updated_at: string;
@@ -113,6 +114,41 @@ export interface Document {
   size_bytes: number;
   parent_id?: string;
   created_at: string;
+}
+
+export type ActivityVerb =
+  | "task.created"
+  | "task.completed"
+  | "expense.created"
+  | "document.uploaded"
+  | "parent.created"
+  | "member.joined";
+
+export interface ActivityEntry {
+  id: string;
+  family_id: string;
+  actor_id?: string;
+  actor_name: string;
+  verb: ActivityVerb;
+  subject_type: string;
+  subject_id?: string;
+  subject_label: string;
+  created_at: string;
+}
+
+export interface Contribution {
+  member_id: string;
+  member_name: string;
+  tasks_completed: number;
+  expenses_paid_count: number;
+  expenses_paid_cents: number;
+}
+
+export interface NotificationPreferences {
+  user_id: string;
+  task_assigned_email: boolean;
+  digest_cadence: string;
+  updated_at: string;
 }
 
 export interface AuthUser {

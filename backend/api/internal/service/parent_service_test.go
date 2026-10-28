@@ -15,7 +15,8 @@ import (
 func newTestParentService(t *testing.T) (service.ParentService, *mockrepository.MockParentRepository) {
 	t.Helper()
 	repo := &mockrepository.MockParentRepository{}
-	return service.NewParentService(repo), repo
+	activityRepo := &mockrepository.MockActivityRepository{}
+	return service.NewParentService(repo, activityRepo), repo
 }
 
 func TestCreateParentSuccess(t *testing.T) {
@@ -40,6 +41,33 @@ func TestCreateParentSuccess(t *testing.T) {
 	assert.Equal(t, "Linda Doe", parent.Name)
 	assert.Equal(t, "Mom", parent.Relation)
 	assert.Equal(t, "family-1", parent.FamilyID)
+}
+
+func TestCreateParentLogsActivity(t *testing.T) {
+	repo := &mockrepository.MockParentRepository{}
+	activityRepo := &mockrepository.MockActivityRepository{}
+	svc := service.NewParentService(repo, activityRepo)
+
+	repo.CreateFunc = func(ctx context.Context, p *models.Parent) error {
+		p.ID = "parent-1"
+		return nil
+	}
+	var logged *models.ActivityEntry
+	activityRepo.CreateFunc = func(ctx context.Context, entry *models.ActivityEntry) error {
+		logged = entry
+		return nil
+	}
+
+	_, err := svc.CreateParent(context.Background(), models.CreateParentInput{
+		FamilyID: "family-1", Name: "Carlos", ActorID: "member-1", ActorName: "Jamie",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, logged)
+	assert.Equal(t, "parent.created", logged.Verb)
+	assert.Equal(t, "parent", logged.SubjectType)
+	assert.Equal(t, "Carlos", logged.SubjectLabel)
+	assert.Equal(t, "Jamie", logged.ActorName)
 }
 
 func TestCreateParentBlankName(t *testing.T) {
